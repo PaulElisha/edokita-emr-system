@@ -1,26 +1,36 @@
 {
-  "name": "base-multi-swap",
+  "name": "hospital-management",
   "version": "1.0.0",
-  "main": "app.js",
-  "repository": "https://github.com/PaulElisha/base-multi-swap.git",
-  "author": "Paul Elisha <ireajao@yahoo.com>",
-  "license": "MIT",
+  "description": "Hospital management backend built on top of the OpenEMR API (standard + FHIR R4)",
+  "main": "dist/app.js",
+  "type": "module",
   "scripts": {
-    "start": "nodemon app.js",
-    "test": "jest"
+    "build": "esbuild src/app.ts --bundle --platform=node --target=node18 --format=esm --packages=external --outfile=dist/app.js",
+    "start": "node dist/app.js",
+    "dev": "tsx watch src/app.ts",
+    "typecheck": "tsc --noEmit",
+    "probe": "tsx src/scripts/probe.ts"
+  },
+  "keywords": ["hospital", "emr", "fhir", "openemr", "healthcare"],
+  "author": "paul elisha",
+  "license": "MIT",
+  "dependencies": {
+    "custom-env": "^2.0.6",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "helmet": "^8.2.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "dotenv": "^17.2.1",
-    "nodemon": "^3.1.10"
-  },
-  "dependencies": {
-    "bcrypt": "^6.0.0",
-    "cookie-parser": "^1.4.7",
-    "express": "^5.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "mongodb": "^6.18.0",
-    "mongoose": "^8.16.5",
-    "node-cron": "^4.2.1",
-    "nodemailer": "^7.0.5"
+    "@tsconfig/node22": "^22.0.5",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/swagger-ui-express": "^4.1.8",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3"
   }
 }

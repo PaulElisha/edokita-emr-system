@@ -1,5 +1,5 @@
 /** @format */
-import { OpenEMR } from "../env.ts";
+import { OpenEMR } from "../../env.ts";
 import type { FhirBundle, FhirResource } from "../types/fhir.ts";
 
 export type QueryValue = string | number | boolean | undefined | null;

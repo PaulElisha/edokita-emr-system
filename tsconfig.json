@@ -12,5 +12,9 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "env.ts",
+    "custom-env.d.ts"
+  ]
 }

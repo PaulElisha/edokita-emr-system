@@ -1,5 +1,5 @@
 /** @format */
-import { OpenEMR } from "../../env.ts";
+import { OpenEMR } from "../../../env.ts";
 import { openemr } from "../../lib/openemr.ts";
 
 export interface VersionInfo {

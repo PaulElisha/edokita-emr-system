@@ -1,5 +1,5 @@
 /** @format */
-import { Env } from "./env.ts";
+import { Env } from "../env.ts";
 import pino from "pino";
 
 const logger = pino({

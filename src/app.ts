@@ -1,5 +1,5 @@
 /** @format */
-import { Env } from "./env.ts";
+import { Env } from "../env.ts";
 import logger from "./logger.ts";
 import { errorHandler, notFound } from "./middleware/error-handler.ts";
 import adminRouter from "./modules/admin/admin.route.ts";

@@ -1,0 +1,54 @@
+{
+  "editor.fontFamily": "Fira Code",
+  "editor.fontLigatures": true,
+  "editor.fontSize": 11,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  // "editor.defaultFormatter": "rvest.vs-code-prettier-eslint",
+  "editor.formatOnPaste": false, // required
+  "editor.formatOnType": false, // required
+  "editor.formatOnSave": true, // optional
+  "editor.formatOnSaveMode": "file", // required to format on save
+  "files.autoSave": "onFocusChange", // optional but recommended
+  "vs-code-prettier-eslint.prettierLast": "true",
+  "prettier.tabWidth": 1,
+  "editor.tabSize": 1,
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "#js/ts.preferences.quoteStyle#": "single",
+    "#js/ts.suggest.completeJSDocs#": true,
+    "#typescript.suggest.jsdoc.generateReturns#": true,
+    "#typescript.suggest.enabled#": true
+  },
+  "tsEssentialPlugins.methodSnippets.insertText": "always-declaration",
+  "tsEssentialPlugins.autoImport.changeSorting": {
+    "join": [
+      "path/posix"
+    ], // other suggestions will be below
+    "resolve": [
+      "*",
+      "path/posix"
+    ], // make `path/posix` appear below any other suggestions
+    "useState": [
+      "."
+    ], // `.` (dot) is reserved for local suggestions, which makes them appear above other
+  },
+  "tsEssentialPlugins.suggestions.ignoreAutoImports": [
+    "path", // ignore path, but not path/posix or path/win32 modules
+    "path/*", // ignore path, path/posix and path/win32
+    "path/*#join", // ignore path, path/posix and path/win32, but only join symbol
+    "path/*#join,resolve",
+  ],
+  "workbench.colorTheme": "Cursor Dark Midnight",
+  "debug.terminal.clearBeforeReusing": true,
+  "workbench.iconTheme": "vs-minimal",
+  "workbench.preferredDarkColorTheme": "Cursor Dark Midnight",
+  "workbench.preferredHighContrastColorTheme": "Cursor Dark Midnight",
+  "workbench.tree.indent": 4,
+  "workbench.tree.renderIndentGuides": "always",
+  "workbench.editor.alwaysShowEditorActions": true,
+  "workbench.preferredHighContrastLightColorTheme": "Cursor Dark Midnight"
+  // set as "true" to run 'prettier' last not first
+}

@@ -1,8 +1,45 @@
 {
-  "editor.fontFamily": "Fira Code",
+  "editor.fontFamily": "'Fira Code'",
   "editor.fontLigatures": true,
   "editor.fontSize": 11,
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.defaultFormatter": "esbenp.prettier-vscode", // Smooth, modern cursor behavior
+  "editor.cursorBlinking": "expand",
+  "editor.cursorSmoothCaretAnimation": "on",
+  // Clean up UI clutter to focus purely on the code
+  "editor.minimap.enabled": false,
+  "workbench.tree.indent": 10, // Generous, clean file tree nesting
+  "editor.lineHeight": 22, // Increases spacing between lines for breathability
+  // Modern bracket pairing aesthetics
+  "editor.bracketPairColorization.enabled": true,
+  "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
+  "editor.guides.bracketPairs": "active",
+  // Sleek Fira Code Ligature upgrades (like connecting arrows and comparisons)
+  "editor.tokenColorCustomizations": {
+    "textMateRules": [
+      {
+        "scope": [
+          "storage.type",
+          "keyword.control",
+          "keyword.operator.new",
+          "entity.other.attribute-name",
+          "variable.language",
+          "variable.parameter",
+          "entity.name.tag"
+        ],
+        "settings": {
+          "fontStyle": "italic"
+        }
+      },
+      {
+        "scope": [
+          "comment"
+        ],
+        "settings": {
+          "fontStyle": ""
+        }
+      }
+    ]
+  },
   // "editor.defaultFormatter": "rvest.vs-code-prettier-eslint",
   "editor.formatOnPaste": false, // required
   "editor.formatOnType": false, // required
@@ -11,7 +48,7 @@
   "files.autoSave": "onFocusChange", // optional but recommended
   "vs-code-prettier-eslint.prettierLast": "true",
   "prettier.tabWidth": 1,
-  "editor.tabSize": 1,
+  "editor.tabSize": 2,
   "[javascript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
@@ -44,11 +81,11 @@
   "workbench.colorTheme": "Cursor Dark Midnight",
   "debug.terminal.clearBeforeReusing": true,
   "workbench.iconTheme": "vs-minimal",
-  "workbench.preferredDarkColorTheme": "Cursor Dark Midnight",
+  "workbench.preferredDarkColorTheme": "Dark- Modern",
   "workbench.preferredHighContrastColorTheme": "Cursor Dark Midnight",
-  "workbench.tree.indent": 4,
   "workbench.tree.renderIndentGuides": "always",
   "workbench.editor.alwaysShowEditorActions": true,
-  "workbench.preferredHighContrastLightColorTheme": "Cursor Dark Midnight"
+  "workbench.preferredHighContrastLightColorTheme": "Cursor Dark Midnight",
+  "debug.javascript.autoAttachFilter": "off"
   // set as "true" to run 'prettier' last not first
 }

@@ -6,14 +6,18 @@
 # - OpenEMR image reads MYSQL_ROOT_PASS / MYSQL_PASS (NOT the docker-compose *_PASSWORD names).
 # - The Aiven project CA is placed on the disk at
 #   sites/default/documents/certificates/mysql-ca so OpenEMR connects over TLS.
+#   Add the CA as a Render Secret File named mysql-ca (content of certs/ca.pem).
+# - We build deploy/openemr/Dockerfile rather than the plain image: Render disks
+#   start empty, so we seed sites/ from the image's pristine defaults or the
+#   entrypoint dies with "Cannot upgrade - OpenEMR is not configured yet".
 # - Secrets are marked sync:false -> set their real values in the Render Dashboard.
 
 services:
   - type: web
     name: openemr
-    runtime: image
-    image:
-      url: docker.io/openemr/openemr@sha256:086c92c5d94b112fb917763dde6c2bcb86cdddc5c562085b32c528e73ea514e2
+    runtime: docker
+    dockerfilePath: ./deploy/openemr/Dockerfile
+    dockerContext: ./
     region: oregon
     plan: 1c-2g
     healthCheckPath: /interface/login/login.php

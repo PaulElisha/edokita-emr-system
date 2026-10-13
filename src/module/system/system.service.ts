@@ -36,7 +36,7 @@ export async function getVersion(): Promise<VersionInfo> {
     version,
     details: rows[0] ?? null,
     fhirVersion: "R4",
-    baseUrl: OpenEMR.baseUrl,
+    baseUrl: OpenEMR.apiBase,
   };
 }
 

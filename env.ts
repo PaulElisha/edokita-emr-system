@@ -25,7 +25,6 @@ const EnvSchema = z.object({
 
  PORT: z.coerce.number(),
  LOCAL_URL: z.string(),
- BASE_URL: z.string(),
 
  NODE_ENV: z.enum(["production", "development", "testing"]),
  APP_STAGE: z.enum(["dev", "test", "prod"]).default("dev"),
@@ -33,19 +32,14 @@ const EnvSchema = z.object({
  CORS_ORIGIN: z.string(),
  LOG_LEVEL: z.string().default("info"),
 
- LOCAL_OPENEMR_URL: z.string(),
- LOCAL_OPENEMR_CLIENT_ID: z.string(),
- LOCAL_OPENEMR_AUD_URI: z.string(),
-
+ // OpenEMR site root, no trailing path. Standard API and FHIR are derived from it.
+ // e.g. http://localhost:8400 (dev) or https://openemr-xxxx.onrender.com (prod)
  OPENEMR_URL: z.string(),
  OPENEMR_CLIENT_ID: z.string(),
- OPENEMR_AUD_URI: z.string(),
-
  OPENEMR_USERNAME: z.string(),
  OPENEMR_PASSWORD: z.string(),
-
-  OPENEMR_BASE_URL: z.string(),
-  OPENEMR_ACCESS_TOKEN: z.string().default(""),
+ // Optional pre-minted bearer token; minted/refreshed automatically when absent.
+ OPENEMR_ACCESS_TOKEN: z.string().default(""),
 });
 export type EnvType = z.infer<typeof EnvSchema>;
 let Env: EnvType;
@@ -79,17 +73,26 @@ try {
  throw e;
 }
 
+const withoutTrailingSlash = (value: string) => value.replace(/\/+$/, "");
+const openemrUrl = withoutTrailingSlash(Env.OPENEMR_URL);
+
+/**
+ * Single source of truth for OpenEMR URLs. Everything is derived from
+ * OPENEMR_URL so there is only one URL to configure per environment.
+ */
 const OpenEMR = {
-  baseUrl: Env.OPENEMR_BASE_URL.replace(/\/$/, ""),
-  apiBase: () => `${Env.OPENEMR_BASE_URL.replace(/\/$/, "")}/apis/default`,
-  fhirBase: () => `${Env.OPENEMR_BASE_URL.replace(/\/$/, "")}/fhir`,
-  accessToken: Env.OPENEMR_ACCESS_TOKEN,
-  oauthUrl: Env.OPENEMR_BASE_URL.replace(/\/apis\/default\/?$/, "").replace(/\/$/, ""),
-  url: isProduction ? Env.OPENEMR_URL : Env.LOCAL_OPENEMR_URL,
-  clientId: isProduction ? Env.OPENEMR_CLIENT_ID : Env.LOCAL_OPENEMR_CLIENT_ID,
-  audUri: isProduction ? Env.OPENEMR_AUD_URI : Env.LOCAL_OPENEMR_AUD_URI,
-  username: Env.OPENEMR_USERNAME,
-  password: Env.OPENEMR_PASSWORD,
+ /** Site root, no path — e.g. https://openemr.example.com */
+ url: openemrUrl,
+ /** OAuth2 token endpoint */
+ oauthUrl: `${openemrUrl}/oauth2/default/token`,
+ /** Standard (non-FHIR) REST API base */
+ apiBase: `${openemrUrl}/apis/default`,
+ /** FHIR R4 base */
+ fhirBase: `${openemrUrl}/apis/default/fhir`,
+ clientId: Env.OPENEMR_CLIENT_ID,
+ username: Env.OPENEMR_USERNAME,
+ password: Env.OPENEMR_PASSWORD,
+ accessToken: Env.OPENEMR_ACCESS_TOKEN,
 };
 
 export const isProd = () => Env.APP_STAGE === "prod";

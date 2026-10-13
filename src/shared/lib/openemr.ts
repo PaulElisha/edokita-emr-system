@@ -35,11 +35,11 @@ class OpenEMRClient {
 
   constructor(
     tokenProvider: (force?: boolean) => Promise<string> = getAccessToken,
-    baseUrl = OpenEMR.baseUrl,
+    apiBase = OpenEMR.apiBase,
   ) {
     this.tokenProvider = tokenProvider;
-    this.apiBase = baseUrl.replace(/\/$/, "");
-    this.fhirBase = `${baseUrl.replace(/\/$/, "")}/fhir`;
+    this.apiBase = apiBase.replace(/\/+$/, "");
+    this.fhirBase = `${this.apiBase}/fhir`;
   }
 
   private async request<T>(

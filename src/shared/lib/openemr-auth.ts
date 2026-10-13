@@ -47,7 +47,7 @@ async function mint(): Promise<string> {
     scope: OPENEMR_SCOPE,
   });
 
-  const response = await fetch(`${OpenEMR.oauthUrl}/oauth2/default/token`, {
+  const response = await fetch(OpenEMR.oauthUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,

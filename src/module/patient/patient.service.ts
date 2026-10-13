@@ -65,44 +65,55 @@ export async function getPatient(id: string) {
 }
 
 export async function createPatient(input: CreatePatientInput) {
-  const resource: Record<string, unknown> = {
+   const resource = buildPatientResource(input);
+   const created = await openemr.fhirCreate<FhirPatient>("Patient", resource);
+   return mapPatient(created);
+}
+
+export async function updatePatient(id: string, input: CreatePatientInput) {
+   const resource = buildPatientResource(input);
+   const updated = await openemr.fhirUpdate<FhirPatient>("Patient", id, resource);
+   return mapPatient(updated);
+}
+
+function buildPatientResource(input: CreatePatientInput): Record<string, unknown> {
+   const resource: Record<string, unknown> = {
     resourceType: "Patient",
     active: true,
     name: [
-      {
-        use: "official",
-        family: input.lname,
-        given: [input.fname, input.mname].filter(Boolean),
-      },
+     {
+      use: "official",
+      family: input.lname,
+      given: [input.fname, input.mname].filter(Boolean),
+     },
     ],
     gender: GENDER_MAP[input.gender.toLowerCase()] ?? "unknown",
     birthDate: input.birthDate,
     telecom: [] as unknown[],
-  };
+   };
 
-  if (input.phone) {
+   if (input.phone) {
     (resource.telecom as unknown[]).push({ system: "phone", value: input.phone, use: "home" });
-  }
-  if (input.email) {
+   }
+   if (input.email) {
     (resource.telecom as unknown[]).push({ system: "email", value: input.email, use: "home" });
-  }
-  if (input.street || input.city || input.state || input.postalCode || input.countryCode) {
+   }
+   if (input.street || input.city || input.state || input.postalCode || input.countryCode) {
     resource.address = [
-      {
-        use: "home",
-        line: input.street ? [input.street] : undefined,
-        city: input.city,
-        state: input.state,
-        postalCode: input.postalCode,
-        country: input.countryCode,
-      },
+     {
+      use: "home",
+      line: input.street ? [input.street] : undefined,
+      city: input.city,
+      state: input.state,
+      postalCode: input.postalCode,
+      country: input.countryCode,
+     },
     ];
-  }
+   }
 
-  const created = await openemr.fhirCreate<FhirPatient>("Patient", resource);
-  return mapPatient(created);
+   return resource;
 }
 
 export function patientAge(birthDate: string): number {
-  return calcAge(birthDate);
+   return calcAge(birthDate);
 }

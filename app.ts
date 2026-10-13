@@ -31,6 +31,7 @@ class App {
   this.app.use(pinoHttp({ logger }));
   this.app.use(helmet);
   this.app.use(express.urlencoded({ limit: "10mb", extended: true }));
+   this.app.use(express.json({ limit: "10mb" }));
  }
 
  initializeRoutes() {

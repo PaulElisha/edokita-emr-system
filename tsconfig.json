@@ -1,19 +1,81 @@
 {
   "extends": "@tsconfig/node22/tsconfig.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2024",
+      "DOM"
+    ],
+    "paths": {
+      "@*": [
+        "./.*"
+      ],
+      "@webhook/*": [
+        "./src/webhook/*"
+      ],
+      "@shared/*": [
+        "./src/shared/*"
+      ],
+      "@app/*": [
+        "./src/config/app/*"
+      ],
+      "@auth/*": [
+        "./src/config/auth/*"
+      ],
+      "@swagger/*": [
+        "./src/config/swagger/*"
+      ],
+      "@db/*": [
+        "./src/config/db/*"
+      ],
+      "@error/*": [
+        "./src/shared/error/*"
+      ],
+      "@module/*": [
+        "./src/module/*"
+      ],
+      "@middleware/*": [
+        "./src/shared/middleware/*"
+      ],
+      "@enum/*": [
+        "./src/shared/enum/*"
+      ],
+      "@lib/*": [
+        "./src/shared/lib/*"
+      ],
+      "@schema/*": [
+        "./src/config/db/schema/*"
+      ],
+      "@types/*": [
+        "./src/shared/types/*"
+      ],
+    },
+    "outDir": "./dist",
     "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "skipLibCheck": true
+    "experimentalDecorators": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "Nodenext",
+    "moduleResolution": "Nodenext",
+    "composite": true,
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "src",
+    "src/**/*",
     "env.ts",
-    "custom-env.d.ts"
+    "app.ts",
+    "drizzle.config.ts",
+    "fasy.d.ts",
+    "custom-env.d.ts",
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
   ]
 }

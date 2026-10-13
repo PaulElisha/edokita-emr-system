@@ -2,7 +2,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { param } from "@shared/lib/http.ts";
-import { createDoctor, getDoctor, listDoctors } from "@module/doctor/doctor.service.ts";
+import { createDoctor, getDoctor, listDoctors, updateDoctor } from "@module/doctor/doctor.service.ts";
 
 const listQuerySchema = z.object({
   search: z.string().optional(),
@@ -46,6 +46,16 @@ export async function create(req: Request, res: Response, next: NextFunction) {
     const input = createBodySchema.parse(req.body);
     const data = await createDoctor(input);
     res.status(201).json({ success: true, data });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function update(req: Request, res: Response, next: NextFunction) {
+  try {
+    const input = createBodySchema.parse(req.body);
+    const data = await updateDoctor(param(req, "id"), input);
+    res.json({ success: true, data });
   } catch (e) {
     next(e);
   }

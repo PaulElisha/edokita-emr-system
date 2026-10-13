@@ -45,37 +45,48 @@ export async function getDoctor(id: string) {
 }
 
 export async function createDoctor(input: CreateDoctorInput) {
-  const resource: Record<string, unknown> = {
+   const resource = buildPractitionerResource(input);
+   const created = await openemr.fhirCreate<FhirPractitioner>("Practitioner", resource);
+   return mapPractitioner(created);
+}
+
+export async function updateDoctor(id: string, input: CreateDoctorInput) {
+   const resource = buildPractitionerResource(input);
+   const updated = await openemr.fhirUpdate<FhirPractitioner>("Practitioner", id, resource);
+   return mapPractitioner(updated);
+}
+
+function buildPractitionerResource(input: CreateDoctorInput): Record<string, unknown> {
+   const resource: Record<string, unknown> = {
     resourceType: "Practitioner",
     active: true,
+    identifier: input.npi
+     ? [{ system: "http://hl7.org/fhir/sid/us-npi", value: input.npi }]
+     : [],
     name: [
-      {
-        use: "official",
-        family: input.lname,
-        given: [input.fname, input.mname].filter(Boolean),
-      },
+     {
+      use: "official",
+      family: input.lname,
+      given: [input.fname, input.mname].filter(Boolean),
+     },
     ],
     telecom: [] as unknown[],
-  };
+   };
 
-  if (input.email) {
+   if (input.email) {
     (resource.telecom as unknown[]).push({ system: "email", value: input.email, use: "work" });
-  }
-  if (input.phone) {
+   }
+   if (input.phone) {
     (resource.telecom as unknown[]).push({ system: "phone", value: input.phone, use: "work" });
-  }
+   }
 
-  if (input.specialty || input.npi) {
+   if (input.specialty) {
     resource.qualification = [
-      {
-        identifier: input.npi
-          ? { system: "http://hl7.org/fhir/sid/us-npi", value: input.npi }
-          : undefined,
-        code: { text: input.specialty ?? "" },
-      },
+     {
+      code: { text: input.specialty },
+     },
     ];
-  }
+   }
 
-  const created = await openemr.fhirCreate<FhirPractitioner>("Practitioner", resource);
-  return mapPractitioner(created);
+   return resource;
 }

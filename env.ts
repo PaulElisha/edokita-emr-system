@@ -37,10 +37,15 @@ const EnvSchema = z.object({
  LOCAL_OPENEMR_CLIENT_ID: z.string(),
  LOCAL_OPENEMR_AUD_URI: z.string(),
 
- OPENEMR_BASE_URL: z.string(),
- OPENEMR_ACCESS_TOKEN: z
-  .string()
-  .min(10, "OPENEMR_ACCESS_TOKEN looks too short to be a real token"),
+ OPENEMR_URL: z.string(),
+ OPENEMR_CLIENT_ID: z.string(),
+ OPENEMR_AUD_URI: z.string(),
+
+ OPENEMR_USERNAME: z.string(),
+ OPENEMR_PASSWORD: z.string(),
+
+  OPENEMR_BASE_URL: z.string(),
+  OPENEMR_ACCESS_TOKEN: z.string().default(""),
 });
 export type EnvType = z.infer<typeof EnvSchema>;
 let Env: EnvType;
@@ -75,10 +80,16 @@ try {
 }
 
 const OpenEMR = {
- baseUrl: Env.OPENEMR_BASE_URL.replace(/\/$/, ""),
- apiBase: () => `${Env.OPENEMR_BASE_URL.replace(/\/$/, "")}/apis/default`,
- fhirBase: () => `${Env.OPENEMR_BASE_URL.replace(/\/$/, "")}/fhir`,
- accessToken: Env.OPENEMR_ACCESS_TOKEN,
+  baseUrl: Env.OPENEMR_BASE_URL.replace(/\/$/, ""),
+  apiBase: () => `${Env.OPENEMR_BASE_URL.replace(/\/$/, "")}/apis/default`,
+  fhirBase: () => `${Env.OPENEMR_BASE_URL.replace(/\/$/, "")}/fhir`,
+  accessToken: Env.OPENEMR_ACCESS_TOKEN,
+  oauthUrl: Env.OPENEMR_BASE_URL.replace(/\/apis\/default\/?$/, "").replace(/\/$/, ""),
+  url: isProduction ? Env.OPENEMR_URL : Env.LOCAL_OPENEMR_URL,
+  clientId: isProduction ? Env.OPENEMR_CLIENT_ID : Env.LOCAL_OPENEMR_CLIENT_ID,
+  audUri: isProduction ? Env.OPENEMR_AUD_URI : Env.LOCAL_OPENEMR_AUD_URI,
+  username: Env.OPENEMR_USERNAME,
+  password: Env.OPENEMR_PASSWORD,
 };
 
 export const isProd = () => Env.APP_STAGE === "prod";

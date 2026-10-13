@@ -1,5 +1,6 @@
 /** @format */
 import { OpenEMR } from "@/env.ts";
+import { getAccessToken } from "@shared/lib/openemr-auth.ts";
 import type { FhirBundle, FhirResource } from "@shared/types/fhir.ts";
 import OpenEMRException from "@error/openemr.ts";
 import type { HttpStatusCodeType } from "@enum/http.ts";
@@ -28,13 +29,16 @@ function buildQuery(query?: RequestOptions["query"]): string {
 }
 
 class OpenEMRClient {
-  private readonly accessToken: string;
+  private readonly tokenProvider: (force?: boolean) => Promise<string>;
   private readonly apiBase: string;
   private readonly fhirBase: string;
 
-  constructor(accessToken: string, baseUrl = OpenEMR.baseUrl) {
-    this.accessToken = accessToken;
-    this.apiBase = `${baseUrl.replace(/\/$/, "")}/apis/default`;
+  constructor(
+    tokenProvider: (force?: boolean) => Promise<string> = getAccessToken,
+    baseUrl = OpenEMR.baseUrl,
+  ) {
+    this.tokenProvider = tokenProvider;
+    this.apiBase = baseUrl.replace(/\/$/, "");
     this.fhirBase = `${baseUrl.replace(/\/$/, "")}/fhir`;
   }
 
@@ -46,7 +50,6 @@ class OpenEMRClient {
     const url = `${base}${path}${buildQuery(query)}`;
     const headers: Record<string, string> = {
       Accept: accept,
-      Authorization: `Bearer ${this.accessToken}`,
     };
 
     let payload: string | undefined;
@@ -55,16 +58,23 @@ class OpenEMRClient {
       payload = JSON.stringify(body);
     }
 
-    let res: Response;
-    try {
-      res = await fetch(url, { method, headers, body: payload });
-    } catch (e) {
-      throw new OpenEMRException(
-        `Upstream OpenEMR unreachable: ${(e as Error).message}`,
-        HttpStatus.BAD_GATEWAY,
-        ErrorCode.OPENEMR_API_ERROR,
-        null,
-      );
+    const send = async (token: string): Promise<Response> => {
+      headers.Authorization = `Bearer ${token}`;
+      try {
+        return await fetch(url, { method, headers, body: payload });
+      } catch (e) {
+        throw new OpenEMRException(
+          `Upstream OpenEMR unreachable: ${(e as Error).message}`,
+          HttpStatus.BAD_GATEWAY,
+          ErrorCode.OPENEMR_API_ERROR,
+          null,
+        );
+      }
+    };
+
+    let res = await send(await this.tokenProvider());
+    if (res.status === 401) {
+      res = await send(await this.tokenProvider(true));
     }
 
     const text = await res.text();
@@ -128,6 +138,18 @@ class OpenEMRClient {
     });
   }
 
+  /** FHIR update. Returns the updated resource. */
+  fhirUpdate<R extends FhirResource = FhirResource>(
+    resourceType: string,
+    id: string,
+    resource: Record<string, unknown>,
+  ): Promise<R> {
+    return this.request(this.fhirBase, `/${resourceType}/${id}`, {
+      method: "PUT",
+      body: { ...resource, id },
+    });
+  }
+
   /** Standard OpenEMR GET; unwraps the `data` array from the envelope. */
   async standardGet<T = Record<string, unknown>>(
     path: string,
@@ -175,6 +197,6 @@ function safeParse(text: string): unknown {
 }
 
 /** Shared singleton backed by env config. */
-export const openemr = new OpenEMRClient(OpenEMR.accessToken);
+export const openemr = new OpenEMRClient();
 
 export default OpenEMRClient;

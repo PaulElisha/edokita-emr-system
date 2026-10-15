@@ -38,6 +38,14 @@ class App {
  }
 
  initializeRoutes() {
+  this.app.get("/", (_req, res) => {
+   res.json({
+    name: "E-Dokita EMR API",
+    status: "ok",
+    docs: "/api/docs",
+   });
+  });
+
   this.app.get("/health", (_req, res) => {
    res.json({
     status: "ok",
@@ -52,9 +60,9 @@ class App {
   this.app.use("/api/admin", adminRouter);
   this.app.use("/api/doctors", doctorRouter);
   this.app.use("/api/patients", patientRouter);
- this.app.use("/api/appointments", appointmentRouter);
- this.app.use("/api/emr", emrRouter);
- this.app.use("/api/openemr", openemrRouter);
+  this.app.use("/api/appointments", appointmentRouter);
+  this.app.use("/api/emr", emrRouter);
+  this.app.use("/api/openemr", openemrRouter);
 
   this.app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(spec, options));
   this.app.get("/api/docs.json", (_req, res) => {

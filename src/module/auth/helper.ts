@@ -8,7 +8,7 @@ import { toError } from "@shared/error/error.ts";
 import { decodeJwtPayload } from "@auth/jwt.ts";
 import {
  authorizationServer,
- clientAuth,
+ getClientAuth,
  oauthClient,
  oauthOptions,
 } from "@auth/oauth.ts";
@@ -89,7 +89,7 @@ export async function tokenRequest(
   const response = await genericTokenEndpointRequest(
    authorizationServer,
    oauthClient,
-   clientAuth,
+   getClientAuth(),
    grantType,
    params,
    oauthOptions,

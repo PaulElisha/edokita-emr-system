@@ -26,5 +26,21 @@ export const oauthClient: Client = {
  client_secret: OpenEMR.clientSecret,
 };
 
-/** Confidential client: authenticate at the token endpoint with `client_secret_post`. */
-export const clientAuth = ClientSecretPost(OpenEMR.clientSecret);
+let clientAuth: ReturnType<typeof ClientSecretPost> | null = null;
+
+/**
+ * Confidential client: authenticate at the token endpoint with
+ * `client_secret_post`. Built lazily so a missing client secret surfaces as a
+ * clear runtime error instead of crashing the process at import time.
+ */
+export function getClientAuth(): ReturnType<typeof ClientSecretPost> {
+ if (!clientAuth) {
+  if (!OpenEMR.clientSecret) {
+   throw new Error(
+    "OPENEMR_CLIENT_SECRET is not set; configure it to enable OpenEMR OAuth2",
+   );
+  }
+  clientAuth = ClientSecretPost(OpenEMR.clientSecret);
+ }
+ return clientAuth;
+}

@@ -131,6 +131,12 @@ const OpenEMR = {
  workingHoursEnd: Env.OPENEMR_WORKING_HOURS_END,
 };
 
+if (!Env.OPENEMR_CLIENT_SECRET) {
+ console.warn(
+  "OPENEMR_CLIENT_SECRET is not set; OpenEMR OAuth2 token minting will fail until it is configured.",
+ );
+}
+
 export const isProd = () => Env.APP_STAGE === "prod";
 export const isDev = () => Env.APP_STAGE === "dev";
 export const isTest = () => Env.APP_STAGE === "test";

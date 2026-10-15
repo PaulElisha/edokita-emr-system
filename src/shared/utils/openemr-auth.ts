@@ -3,7 +3,7 @@ import { OpenEMR } from "@/env.ts";
 import { decodeJwtPayload } from "@auth/jwt.ts";
 import {
  authorizationServer,
- clientAuth,
+ getClientAuth,
  oauthClient,
  oauthOptions,
 } from "@auth/oauth.ts";
@@ -49,7 +49,7 @@ async function mint(): Promise<string> {
  const response = await genericTokenEndpointRequest(
   authorizationServer,
   oauthClient,
-  clientAuth,
+  getClientAuth(),
   "password",
   params,
   oauthOptions,

@@ -1,119 +1,125 @@
 /** @format */
-import { calcAge, mapPatient } from "@shared/lib/fhir-mapper.ts";
-import { openemr, type QueryValue } from "@shared/lib/openemr.ts";
+import {
+ calcAge,
+ mapPatient,
+ type MappedPatient,
+} from "@shared/utils/fhir-mapper.ts";
+import {
+ createdResourceId,
+ type OpenEMRCreateResult,
+ type QueryValue,
+} from "@module/openemr/client.ts";
+import type OpenEMRClient from "@module/openemr/client.ts";
+import APIError from "@error/APIError.ts";
+import { buildPatientResource } from "@module/patient/helper.ts";
+import {
+ contactSchema,
+ fhirListQuerySchema,
+ genderSchema,
+ nameSchema,
+} from "@shared/schemas/common.ts";
 import type { FhirPatient } from "@shared/types/fhir.ts";
+import type { ListResult, Result } from "@shared/types.ts";
+import { toError } from "@shared/error/error.ts";
+import { z } from "zod";
 
-export interface PatientListQuery {
-  search?: string;
-  given?: string;
-  family?: string;
-  gender?: string;
-  birthDate?: string;
-  _count?: number;
-}
+export const patientListQuerySchema = fhirListQuerySchema.extend({
+ gender: genderSchema.optional(),
+});
+export type PatientListQuery = z.infer<typeof patientListQuerySchema>;
 
-export interface CreatePatientInput {
-  fname: string;
-  mname?: string;
-  lname: string;
-  birthDate: string;
-  gender: string;
-  phone?: string;
-  email?: string;
-  street?: string;
-  city?: string;
-  state?: string;
-  postalCode?: string;
-  countryCode?: string;
-}
+export const patientBodySchema = nameSchema.merge(contactSchema).extend({
+ birthDate: z.string().min(1),
+ gender: genderSchema,
+ address: z.string().optional(),
+ street: z.string().optional(),
+ city: z.string().optional(),
+ state: z.string().optional(),
+ postalCode: z.string().optional(),
+ countryCode: z.string().optional(),
+});
+export type CreatePatientInput = z.infer<typeof patientBodySchema>;
 
-const GENDER_MAP: Record<string, string> = {
-  male: "male",
-  "m": "male",
-  "M": "male",
-  "1": "male",
-  female: "female",
-  "f": "female",
-  "F": "female",
-  "2": "female",
-  other: "other",
-  unknown: "unknown",
-};
+export type PatientListResult = ListResult<MappedPatient>;
 
-export async function listPatients(query: PatientListQuery) {
-  const params: Record<string, QueryValue> = {
+class PatientService {
+ list = async (
+  client: OpenEMRClient,
+  query: PatientListQuery,
+ ): Promise<Result<PatientListResult>> => {
+  try {
+   const params: Record<string, QueryValue> = {
     _count: query._count ?? 100,
-  };
-  if (query.search) params._content = query.search;
-  if (query.family) params.family = query.family;
-  if (query.given) params.given = query.given;
-  if (query.gender) params.gender = GENDER_MAP[query.gender.toLowerCase()] ?? query.gender;
-  if (query.birthDate) params.birthdate = query.birthDate;
+   };
+   if (query.family) params.family = query.family;
+   if (query.given) params.given = query.given;
+   if (query.gender) params.gender = query.gender;
+   if (query.search) params._content = query.search;
 
-  const bundle = await openemr.fhirSearch("Patient", params);
-  const resources = (bundle.entry ?? [])
+   const bundle = await client.fhirSearch("Patient", params);
+   const items = (bundle.entry ?? [])
     .map((e) => e.resource as FhirPatient)
     .filter((r) => r?.resourceType === "Patient")
     .map(mapPatient);
 
-  return { total: bundle.total ?? resources.length, items: resources };
-}
+   return [{ total: bundle.total ?? items.length, items }, null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 
-export async function getPatient(id: string) {
-  const patient = await openemr.fhirRead<FhirPatient>("Patient", id);
-  return mapPatient(patient);
-}
+ get = async (
+  client: OpenEMRClient,
+  id: string,
+ ): Promise<Result<MappedPatient>> => {
+  try {
+   const patient = await client.fhirRead<FhirPatient>("Patient", id);
+   return [mapPatient(patient), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 
-export async function createPatient(input: CreatePatientInput) {
-   const resource = buildPatientResource(input);
-   const created = await openemr.fhirCreate<FhirPatient>("Patient", resource);
-   return mapPatient(created);
-}
+ create = async (
+  client: OpenEMRClient,
+  input: CreatePatientInput,
+ ): Promise<Result<MappedPatient>> => {
+  try {
+   const created = await client.fhirCreate<FhirPatient | OpenEMRCreateResult>(
+    "Patient",
+    buildPatientResource(input),
+   );
+   if ("resourceType" in created) return [mapPatient(created), null];
 
-export async function updatePatient(id: string, input: CreatePatientInput) {
-   const resource = buildPatientResource(input);
-   const updated = await openemr.fhirUpdate<FhirPatient>("Patient", id, resource);
-   return mapPatient(updated);
-}
-
-function buildPatientResource(input: CreatePatientInput): Record<string, unknown> {
-   const resource: Record<string, unknown> = {
-    resourceType: "Patient",
-    active: true,
-    name: [
-     {
-      use: "official",
-      family: input.lname,
-      given: [input.fname, input.mname].filter(Boolean),
-     },
-    ],
-    gender: GENDER_MAP[input.gender.toLowerCase()] ?? "unknown",
-    birthDate: input.birthDate,
-    telecom: [] as unknown[],
-   };
-
-   if (input.phone) {
-    (resource.telecom as unknown[]).push({ system: "phone", value: input.phone, use: "home" });
+   const id = createdResourceId(created);
+   if (!id) {
+    return [null, APIError.openEmr("OpenEMR did not return a patient id")];
    }
-   if (input.email) {
-    (resource.telecom as unknown[]).push({ system: "email", value: input.email, use: "home" });
-   }
-   if (input.street || input.city || input.state || input.postalCode || input.countryCode) {
-    resource.address = [
-     {
-      use: "home",
-      line: input.street ? [input.street] : undefined,
-      city: input.city,
-      state: input.state,
-      postalCode: input.postalCode,
-      country: input.countryCode,
-     },
-    ];
-   }
+   const patient = await client.fhirRead<FhirPatient>("Patient", id);
+   return [mapPatient(patient), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 
-   return resource;
+ update = async (
+  client: OpenEMRClient,
+  id: string,
+  input: CreatePatientInput,
+ ): Promise<Result<MappedPatient>> => {
+  try {
+   const updated = await client.fhirUpdate<FhirPatient>(
+    "Patient",
+    id,
+    buildPatientResource(input),
+   );
+   return [mapPatient(updated), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ age = (birthDate: string): number => calcAge(birthDate);
 }
 
-export function patientAge(birthDate: string): number {
-   return calcAge(birthDate);
-}
+export default new PatientService();

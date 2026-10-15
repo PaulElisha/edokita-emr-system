@@ -9,9 +9,6 @@
       "@*": [
         "./.*"
       ],
-      "@webhook/*": [
-        "./src/webhook/*"
-      ],
       "@shared/*": [
         "./src/shared/*"
       ],
@@ -21,11 +18,11 @@
       "@auth/*": [
         "./src/config/auth/*"
       ],
-      "@swagger/*": [
-        "./src/config/swagger/*"
-      ],
       "@db/*": [
         "./src/config/db/*"
+      ],
+      "@swagger/*": [
+        "./src/config/swagger/*"
       ],
       "@error/*": [
         "./src/shared/error/*"
@@ -38,31 +35,17 @@
       ],
       "@enum/*": [
         "./src/shared/enum/*"
-      ],
-      "@lib/*": [
-        "./src/shared/lib/*"
-      ],
-      "@schema/*": [
-        "./src/config/db/schema/*"
-      ],
-      "@types/*": [
-        "./src/shared/types/*"
-      ],
+      ]
     },
-    "outDir": "./dist",
+    "types": ["node", "fhir"],
     "strict": true,
-    "experimentalDecorators": true,
     "noEmit": true,
     "target": "ES2022",
     "module": "Nodenext",
     "moduleResolution": "Nodenext",
-    "composite": true,
-    "declaration": true,
-    "sourceMap": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true,
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
+    "experimentalDecorators": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
@@ -71,8 +54,7 @@
     "env.ts",
     "app.ts",
     "drizzle.config.ts",
-    "fasy.d.ts",
-    "custom-env.d.ts",
+    "custom-env.d.ts"
   ],
   "exclude": [
     "node_modules",

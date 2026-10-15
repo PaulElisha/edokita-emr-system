@@ -1,10 +1,19 @@
 /** @format */
+import SystemController from "@module/system/system.controller.ts";
 import { Router } from "express";
-import { capability, version } from "@module/system/system.controller.ts";
 
-const systemRouter = Router();
+class SystemRouter {
+ router: Router;
 
-systemRouter.get("/version", version);
-systemRouter.get("/capability", capability);
+ constructor() {
+  this.router = Router();
+  this.initializeRoutes();
+ }
 
-export default systemRouter;
+ initializeRoutes() {
+  this.router.get("/version", SystemController.version);
+  this.router.get("/capability", SystemController.capability);
+ }
+}
+
+export default new SystemRouter().router;

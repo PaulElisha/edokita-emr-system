@@ -1,92 +1,148 @@
 /** @format */
-import { mapPractitioner } from "@shared/lib/fhir-mapper.ts";
-import { openemr, type QueryValue } from "@shared/lib/openemr.ts";
+import {
+ mapPractitioner,
+ type MappedPractitioner,
+} from "@shared/utils/fhir-mapper.ts";
+import {
+ createdResourceId,
+ type OpenEMRCreateResult,
+ type QueryValue,
+} from "@module/openemr/client.ts";
+import type OpenEMRClient from "@module/openemr/client.ts";
+import APIError from "@error/APIError.ts";
+import {
+ applyPractitionerProfile,
+ buildDoctorResource,
+ fetchPractitionerProfiles,
+} from "@module/doctor/helper.ts";
+import {
+ contactSchema,
+ fhirListQuerySchema,
+ nameSchema,
+} from "@shared/schemas/common.ts";
 import type { FhirPractitioner } from "@shared/types/fhir.ts";
+import type { ListResult, Result } from "@shared/types.ts";
+import { toError } from "@shared/error/error.ts";
+import { z } from "zod";
 
-export interface DoctorListQuery {
-  search?: string;
-  family?: string;
-  given?: string;
-  active?: string;
-  _count?: number;
-}
+export const doctorListQuerySchema = fhirListQuerySchema.extend({
+ active: z.enum(["true", "false"]).optional(),
+});
+export type DoctorListQuery = z.infer<typeof doctorListQuerySchema>;
 
-export interface CreateDoctorInput {
-  fname: string;
-  lname: string;
-  mname?: string;
-  npi?: string;
-  email?: string;
-  phone?: string;
-  specialty?: string;
-}
+export const doctorAddressSchema = z.object({
+ street: z.string().optional(),
+ street2: z.string().optional(),
+ city: z.string().optional(),
+ state: z.string().optional(),
+ zip: z.string().optional(),
+ country: z.string().optional(),
+});
+export type DoctorAddressInput = z.infer<typeof doctorAddressSchema>;
 
-export async function listDoctors(query: DoctorListQuery) {
-  const params: Record<string, QueryValue> = {
+export const doctorBodySchema = nameSchema.merge(contactSchema).extend({
+ suffix: z.string().optional(),
+ title: z.string().optional(),
+ specialty: z.string().optional(),
+ physicianType: z.string().optional(),
+ npi: z.string().optional(),
+ stateLicenseNumber: z.string().optional(),
+ federalTaxId: z.string().optional(),
+ mobile: z.string().optional(),
+ homePhone: z.string().optional(),
+ fax: z.string().optional(),
+ address: doctorAddressSchema.optional(),
+ active: z.boolean().optional(),
+});
+export type CreateDoctorInput = z.infer<typeof doctorBodySchema>;
+
+export type DoctorListResult = ListResult<MappedPractitioner>;
+
+class DoctorService {
+ list = async (
+  client: OpenEMRClient,
+  query: DoctorListQuery,
+ ): Promise<Result<DoctorListResult>> => {
+  try {
+   const params: Record<string, QueryValue> = {
     _count: query._count ?? 100,
-  };
-  if (query.family) params.family = query.family;
-  if (query.given) params.given = query.given;
-  if (query.active !== undefined) params.active = query.active === "true";
-  if (query.search) params._content = query.search;
+   };
+   if (query.family) params.family = query.family;
+   if (query.given) params.given = query.given;
+   if (query.active !== undefined) params.active = query.active === "true";
+   if (query.search) params._content = query.search;
 
-  const bundle = await openemr.fhirSearch("Practitioner", params);
-  const resources = (bundle.entry ?? [])
+   const bundle = await client.fhirSearch("Practitioner", params);
+   const profiles = await fetchPractitionerProfiles();
+   const items = (bundle.entry ?? [])
     .map((e) => e.resource as FhirPractitioner)
     .filter((r) => r?.resourceType === "Practitioner")
-    .map(mapPractitioner);
+    .map(mapPractitioner)
+    .map((p) => applyPractitionerProfile(p, profiles));
 
-  return { total: bundle.total ?? resources.length, items: resources };
-}
+   return [{ total: bundle.total ?? items.length, items }, null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 
-export async function getDoctor(id: string) {
-  const doctor = await openemr.fhirRead<FhirPractitioner>("Practitioner", id);
-  return mapPractitioner(doctor);
-}
+ get = async (
+  client: OpenEMRClient,
+  id: string,
+ ): Promise<Result<MappedPractitioner>> => {
+  try {
+   const doctor = await client.fhirRead<FhirPractitioner>("Practitioner", id);
+   const profiles = await fetchPractitionerProfiles();
+   return [applyPractitionerProfile(mapPractitioner(doctor), profiles), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 
-export async function createDoctor(input: CreateDoctorInput) {
-   const resource = buildPractitionerResource(input);
-   const created = await openemr.fhirCreate<FhirPractitioner>("Practitioner", resource);
-   return mapPractitioner(created);
-}
-
-export async function updateDoctor(id: string, input: CreateDoctorInput) {
-   const resource = buildPractitionerResource(input);
-   const updated = await openemr.fhirUpdate<FhirPractitioner>("Practitioner", id, resource);
-   return mapPractitioner(updated);
-}
-
-function buildPractitionerResource(input: CreateDoctorInput): Record<string, unknown> {
-   const resource: Record<string, unknown> = {
-    resourceType: "Practitioner",
-    active: true,
-    identifier: input.npi
-     ? [{ system: "http://hl7.org/fhir/sid/us-npi", value: input.npi }]
-     : [],
-    name: [
-     {
-      use: "official",
-      family: input.lname,
-      given: [input.fname, input.mname].filter(Boolean),
-     },
-    ],
-    telecom: [] as unknown[],
-   };
-
-   if (input.email) {
-    (resource.telecom as unknown[]).push({ system: "email", value: input.email, use: "work" });
-   }
-   if (input.phone) {
-    (resource.telecom as unknown[]).push({ system: "phone", value: input.phone, use: "work" });
+ create = async (
+  client: OpenEMRClient,
+  input: CreateDoctorInput,
+ ): Promise<Result<MappedPractitioner>> => {
+  try {
+   const created = await client.fhirCreate<
+    FhirPractitioner | OpenEMRCreateResult
+   >("Practitioner", buildDoctorResource(input));
+   const profiles = await fetchPractitionerProfiles();
+   if ("resourceType" in created) {
+    return [applyPractitionerProfile(mapPractitioner(created), profiles), null];
    }
 
-   if (input.specialty) {
-    resource.qualification = [
-     {
-      code: { text: input.specialty },
-     },
-    ];
+   const id = createdResourceId(created);
+   if (!id) {
+    return [null, APIError.openEmr("OpenEMR did not return a practitioner id")];
    }
+   const practitioner = await client.fhirRead<FhirPractitioner>(
+    "Practitioner",
+    id,
+   );
+   return [applyPractitionerProfile(mapPractitioner(practitioner), profiles), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 
-   return resource;
+ update = async (
+  client: OpenEMRClient,
+  id: string,
+  input: CreateDoctorInput,
+ ): Promise<Result<MappedPractitioner>> => {
+  try {
+   const updated = await client.fhirUpdate<FhirPractitioner>(
+    "Practitioner",
+    id,
+    buildDoctorResource(input),
+   );
+   const profiles = await fetchPractitionerProfiles();
+   return [applyPractitionerProfile(mapPractitioner(updated), profiles), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 }
+
+export default new DoctorService();

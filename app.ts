@@ -4,10 +4,13 @@ import logger from "@app/logger.ts";
 import { errorHandler } from "@middleware/error-handler.ts";
 import adminRouter from "@module/admin/admin.route.ts";
 import appointmentRouter from "@module/appointment/appointment.route.ts";
+import authRouter from "@module/auth/auth.route.ts";
 import doctorRouter from "@module/doctor/doctor.route.ts";
 import emrRouter from "@module/emr/emr.route.ts";
+import openemrRouter from "@module/openemr/openemr.route.ts";
 import patientRouter from "@module/patient/patient.route.ts";
 import systemRouter from "@module/system/system.route.ts";
+import userRouter from "@module/user/user.route.ts";
 import spec, { options } from "@swagger/swagger.ts";
 import cors from "@app/cors.ts";
 import express, { type Express } from "express";
@@ -31,7 +34,7 @@ class App {
   this.app.use(pinoHttp({ logger }));
   this.app.use(helmet);
   this.app.use(express.urlencoded({ limit: "10mb", extended: true }));
-   this.app.use(express.json({ limit: "10mb" }));
+  this.app.use(express.json({ limit: "10mb" }));
  }
 
  initializeRoutes() {
@@ -44,11 +47,14 @@ class App {
   });
 
   this.app.use("/api/system", systemRouter);
+  this.app.use("/api/auth", authRouter);
+  this.app.use("/api/users", userRouter);
   this.app.use("/api/admin", adminRouter);
   this.app.use("/api/doctors", doctorRouter);
   this.app.use("/api/patients", patientRouter);
-  this.app.use("/api/appointments", appointmentRouter);
-  this.app.use("/api/emr", emrRouter);
+ this.app.use("/api/appointments", appointmentRouter);
+ this.app.use("/api/emr", emrRouter);
+ this.app.use("/api/openemr", openemrRouter);
 
   this.app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(spec, options));
   this.app.get("/api/docs.json", (_req, res) => {

@@ -1,21 +1,20 @@
 /** @format */
-import type { NextFunction, Request, Response } from "express";
-import { getCapabilityStatement, getVersion } from "@module/system/system.service.ts";
+import asyncHandler from "@middleware/async-handler.ts";
+import type { Request, Response } from "express";
+import SystemService from "@module/system/system.service.ts";
 
-export async function version(_req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await getVersion();
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
+class SystemController {
+ version = asyncHandler(async (_req: Request, res: Response) => {
+  const [data, err] = await SystemService.version();
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
+
+ capability = asyncHandler(async (_req: Request, res: Response) => {
+  const [data, err] = await SystemService.capability();
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
 }
 
-export async function capability(_req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await getCapabilityStatement();
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
-}
+export default new SystemController();

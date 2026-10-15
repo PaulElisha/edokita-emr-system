@@ -1,30 +1,26 @@
 /** @format */
-import type { NextFunction, Request, Response } from "express";
-import { getStats, listFacilities, listUsers } from "@module/admin/admin.service.ts";
+import asyncHandler from "@middleware/async-handler.ts";
+import type { Request, Response } from "express";
+import AdminService from "@module/admin/admin.service.ts";
 
-export async function stats(_req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await getStats();
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
+class AdminController {
+ stats = asyncHandler(async (req: Request, res: Response) => {
+  const [data, err] = await AdminService.stats(req.openemr!);
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
+
+ users = asyncHandler(async (req: Request, res: Response) => {
+  const [data, err] = await AdminService.users(req.openemr!);
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
+
+ facilities = asyncHandler(async (req: Request, res: Response) => {
+  const [data, err] = await AdminService.facilities(req.openemr!);
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
 }
 
-export async function users(_req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await listUsers();
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
-}
-
-export async function facilities(_req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await listFacilities();
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
-}
+export default new AdminController();

@@ -1,12 +1,58 @@
 /** @format */
+import { authenticate, withOpenEMR } from "@middleware/auth.ts";
+import { requireRole } from "@middleware/role-guard.ts";
+import validate from "@middleware/validation.ts";
+import PatientController from "@module/patient/patient.controller.ts";
+import {
+ patientBodySchema,
+ patientListQuerySchema,
+} from "@module/patient/patient.service.ts";
+import { idParamSchema } from "@shared/schemas/params.ts";
 import { Router } from "express";
-import { create, index, show, update } from "@module/patient/patient.controller.ts";
 
-const patientRouter = Router();
+class PatientRouter {
+ router: Router;
 
-patientRouter.get("/", index);
-patientRouter.get("/:id", show);
-patientRouter.post("/", create);
-patientRouter.put("/:id", update);
+ constructor() {
+  this.router = Router();
+  this.initializeRoutes();
+ }
 
-export default patientRouter;
+ initializeRoutes() {
+  this.router.get(
+   "/",
+   authenticate,
+   withOpenEMR,
+   requireRole("admin", "doctor"),
+   validate(patientListQuerySchema, "query"),
+   PatientController.index,
+  );
+  this.router.get(
+   "/:id",
+   authenticate,
+   withOpenEMR,
+   requireRole("admin", "doctor"),
+   validate(idParamSchema, "params"),
+   PatientController.show,
+  );
+  this.router.post(
+   "/",
+   authenticate,
+   withOpenEMR,
+   requireRole("admin", "doctor"),
+   validate(patientBodySchema),
+   PatientController.create,
+  );
+  this.router.put(
+   "/:id",
+   authenticate,
+   withOpenEMR,
+   requireRole("admin", "doctor", "patient"),
+   validate(idParamSchema, "params"),
+   validate(patientBodySchema),
+   PatientController.update,
+  );
+ }
+}
+
+export default new PatientRouter().router;

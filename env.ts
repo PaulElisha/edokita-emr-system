@@ -40,6 +40,31 @@ const EnvSchema = z.object({
  OPENEMR_PASSWORD: z.string(),
  // Optional pre-minted bearer token; minted/refreshed automatically when absent.
  OPENEMR_ACCESS_TOKEN: z.string().default(""),
+
+ // OAuth2 authorization-code flow (per-user login).
+ OPENEMR_CLIENT_SECRET: z.string().default(""),
+ OPENEMR_REDIRECT_URI: z
+  .string()
+  .default("http://localhost:8000/api/openemr/callback"),
+ FRONTEND_URL: z.string().default("http://localhost:3000"),
+
+ // Appointment booking defaults (OpenEMR calendar identifiers are install-specific).
+ OPENEMR_DEFAULT_APPOINTMENT_CATEGORY: z.string().default("5"),
+ OPENEMR_DEFAULT_FACILITY: z.string().default("3"),
+ OPENEMR_DEFAULT_BILLING_LOCATION: z.string().default("3"),
+ // Working-hours model backing booking validation + future slot search.
+ OPENEMR_WORKING_HOURS_START: z.string().default("09:00"),
+ OPENEMR_WORKING_HOURS_END: z.string().default("17:00"),
+
+ // Postgres connection string for the app's own data (users, OpenEMR tokens).
+ DATABASE_URL: z
+  .string()
+  .default("postgres://postgres:postgres@localhost:5432/edokita"),
+
+ // RS256 key material for signing our own app session JWTs. When unset the
+ // keys are read from private-key.pem / public-key.pem at the project root.
+ APP_JWT_PRIVATE_KEY: z.string().optional(),
+ APP_JWT_PUBLIC_KEY: z.string().optional(),
 });
 export type EnvType = z.infer<typeof EnvSchema>;
 let Env: EnvType;
@@ -83,16 +108,27 @@ const openemrUrl = withoutTrailingSlash(Env.OPENEMR_URL);
 const OpenEMR = {
  /** Site root, no path — e.g. https://openemr.example.com */
  url: openemrUrl,
+ /** OAuth2 issuer (the `iss` claim OpenEMR stamps on tokens) */
+ issuer: `${openemrUrl}/oauth2/default`,
  /** OAuth2 token endpoint */
  oauthUrl: `${openemrUrl}/oauth2/default/token`,
+ /** OAuth2 authorize endpoint (authorization-code flow) */
+ authorizeUrl: `${openemrUrl}/oauth2/default/authorize`,
  /** Standard (non-FHIR) REST API base */
  apiBase: `${openemrUrl}/apis/default`,
  /** FHIR R4 base */
  fhirBase: `${openemrUrl}/apis/default/fhir`,
  clientId: Env.OPENEMR_CLIENT_ID,
+ clientSecret: Env.OPENEMR_CLIENT_SECRET,
+ redirectUri: Env.OPENEMR_REDIRECT_URI,
  username: Env.OPENEMR_USERNAME,
  password: Env.OPENEMR_PASSWORD,
  accessToken: Env.OPENEMR_ACCESS_TOKEN,
+ defaultAppointmentCategory: Env.OPENEMR_DEFAULT_APPOINTMENT_CATEGORY,
+ defaultFacility: Env.OPENEMR_DEFAULT_FACILITY,
+ defaultBillingLocation: Env.OPENEMR_DEFAULT_BILLING_LOCATION,
+ workingHoursStart: Env.OPENEMR_WORKING_HOURS_START,
+ workingHoursEnd: Env.OPENEMR_WORKING_HOURS_END,
 };
 
 export const isProd = () => Env.APP_STAGE === "prod";

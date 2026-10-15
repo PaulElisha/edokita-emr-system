@@ -1,68 +1,52 @@
 /** @format */
-import type { NextFunction, Request, Response } from "express";
-import { z } from "zod";
-import { param } from "@shared/lib/http.ts";
-import { createPatient, getPatient, listPatients, updatePatient } from "@module/patient/patient.service.ts";
+import asyncHandler from "@middleware/async-handler.ts";
+import type { IdParam } from "@shared/schemas/params.ts";
+import type { Request, Response } from "express";
+import PatientService, {
+ type CreatePatientInput,
+ type PatientListQuery,
+} from "@module/patient/patient.service.ts";
 
-const listQuerySchema = z.object({
-  search: z.string().optional(),
-  given: z.string().optional(),
-  family: z.string().optional(),
-  gender: z.string().optional(),
-  birthDate: z.string().optional(),
-  _count: z.coerce.number().int().min(1).max(200).optional(),
-});
+class PatientController {
+ index = asyncHandler(
+  async (
+   req: Request<unknown, unknown, unknown, PatientListQuery>,
+   res: Response,
+  ) => {
+   const [data, err] = await PatientService.list(req.openemr!, req.query);
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
 
-const createBodySchema = z.object({
-  fname: z.string().min(1),
-  mname: z.string().optional(),
-  lname: z.string().min(1),
-  birthDate: z.string().min(1),
-  gender: z.string().min(1),
-  phone: z.string().optional(),
-  email: z.string().email().optional().or(z.literal("")),
-  street: z.string().optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-  postalCode: z.string().optional(),
-  countryCode: z.string().optional(),
-});
+ show = asyncHandler(async (req: Request<IdParam>, res: Response) => {
+  const [data, err] = await PatientService.get(req.openemr!, req.params.id);
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
 
-export async function index(req: Request, res: Response, next: NextFunction) {
-  try {
-    const query = listQuerySchema.parse(req.query);
-    const data = await listPatients(query);
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
+ create = asyncHandler(
+  async (req: Request<unknown, unknown, CreatePatientInput>, res: Response) => {
+   const [data, err] = await PatientService.create(req.openemr!, req.body);
+   if (err) throw err;
+   res.status(201).json({ success: true, data });
+  },
+ );
+
+ update = asyncHandler(
+  async (
+   req: Request<IdParam, unknown, CreatePatientInput>,
+   res: Response,
+  ) => {
+   const [data, err] = await PatientService.update(
+    req.openemr!,
+    req.params.id,
+    req.body,
+   );
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
 }
 
-export async function show(req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = await getPatient(param(req, "id"));
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
-}
-
-export async function create(req: Request, res: Response, next: NextFunction) {
-  try {
-    const input = createBodySchema.parse(req.body);
-    const data = await createPatient(input);
-    res.status(201).json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
-}
-
-export async function update(req: Request, res: Response, next: NextFunction) {
-  try {
-    const input = createBodySchema.parse(req.body);
-    const data = await updatePatient(param(req, "id"), input);
-    res.json({ success: true, data });
-  } catch (e) {
-    next(e);
-  }
-}
+export default new PatientController();

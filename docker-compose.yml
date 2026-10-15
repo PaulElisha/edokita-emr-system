@@ -5,6 +5,24 @@ networks:
   driver: bridge
 
 services:
+ postgres:
+  image: postgres:16
+  networks:
+   - openemr-net
+  ports:
+   - "5432:5432"
+  environment:
+   POSTGRES_USER: postgres
+   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+   POSTGRES_DB: edokita
+  volumes:
+   - pg_data:/var/lib/postgresql/data
+  healthcheck:
+   test: ["CMD-SHELL", "pg_isready -U postgres"]
+   interval: 5s
+   timeout: 5s
+   retries: 10
+
  mysql:
   image: mariadb:10.11
   command: --key-buffer-size=16M --max-allowed-packet=64M --table-open-cache=512 --sort-buffer-size=4M --read-buffer-size=2M --read-rnd-buffer-size=2M --myisam-sort-buffer-size=64M --thread-cache-size=8 --query-cache-size=16M --query-cache-limit=2M --ft-min-word-len=4 --default-storage-engine=InnoDB --transaction-isolation=READ-COMMITTED --max-connections=150
@@ -13,9 +31,9 @@ services:
   volumes:
    - db_data:/var/lib/mysql
   environment:
-   MYSQL_ROOT_PASSWORD: root
+   MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
    MYSQL_USER: openemr
-   MYSQL_PASSWORD: pass
+   MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
   healthcheck:
    test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
    interval: 5s
@@ -34,12 +52,12 @@ services:
    - site_data:/var/www/localhost/htdocs/openemr/sites
   environment:
    MYSQL_HOST: mysql
-   MYSQL_ROOT_PASSWORD: root
+   MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
    MYSQL_USER: openemr
-   MYSQL_PASSWORD: pass
+   MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
    MYSQL_DATABASE: openemr
    OE_USER: admin
-   OE_PASS: pass
+   OE_PASS: ${OPENEMR_PASSWORD:?OPENEMR_PASSWORD must be set}
   depends_on:
    mysql:
     condition: service_healthy
@@ -48,3 +66,4 @@ volumes:
  db_data:
  log_data:
  site_data:
+ pg_data:

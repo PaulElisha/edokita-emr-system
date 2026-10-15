@@ -1,11 +1,24 @@
 /** @format */
+import { authenticate, withOpenEMR } from "@middleware/auth.ts";
+import { requireRole } from "@middleware/role-guard.ts";
+import AdminController from "@module/admin/admin.controller.ts";
 import { Router } from "express";
-import { facilities, stats, users } from "@module/admin/admin.controller.ts";
 
-const adminRouter = Router();
+class AdminRouter {
+ router: Router;
 
-adminRouter.get("/stats", stats);
-adminRouter.get("/users", users);
-adminRouter.get("/facilities", facilities);
+ constructor() {
+  this.router = Router();
+  this.initializeRoutes();
+ }
 
-export default adminRouter;
+ initializeRoutes() {
+  this.router.use(authenticate, withOpenEMR, requireRole("admin"));
+
+  this.router.get("/stats", AdminController.stats);
+  this.router.get("/users", AdminController.users);
+  this.router.get("/facilities", AdminController.facilities);
+ }
+}
+
+export default new AdminRouter().router;

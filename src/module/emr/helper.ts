@@ -5,10 +5,14 @@ import {
  mapClinical,
  mapEncounter,
 } from "@shared/utils/fhir-mapper.ts";
+import { setDefined } from "@shared/utils/object.ts";
 import convert from "convert-units";
 import type OpenEMRClient from "@module/openemr/client.ts";
 import type {
+ AllergyInput,
+ ConditionInput,
  CreateEncounterInput,
+ MedicationInput,
  RecordVitalsInput,
 } from "@module/emr/emr.service.ts";
 import type {
@@ -195,18 +199,6 @@ function bmiStatus(bmi: number): string | undefined {
  return BMI_CATEGORIES.find((c) => bmi > c.min)?.status;
 }
 
-// /** OpenEMR's BMI category boundaries; value matches the `BmiCategory` enum it stores. */
-// function bmiStatus(bmi: number): string | undefined {
-//  if (bmi > 42) return "Obesity III";
-//  if (bmi > 34) return "Obesity II";
-//  if (bmi > 30) return "Obesity I";
-//  if (bmi > 27) return "Overweight";
-//  if (bmi > 25) return "Normal BL";
-//  if (bmi > 18.5) return "Normal";
-//  if (bmi > 10) return "Underweight";
-//  return undefined;
-// }
-
 /**
  * Writes are issued through OpenEMR's Standard REST API (FHIR Encounter/Observation
  * are read-only). Payloads use OpenEMR's own field names: `pc_*` / `form_encounter`
@@ -242,70 +234,90 @@ export function buildVitalsPayload(
   date: input.date ?? toDateString(new Date()),
  };
 
- const bps = num(input.systolic);
- if (bps !== undefined) payload.bps = bps;
- const bpd = num(input.diastolic);
- if (bpd !== undefined) payload.bpd = bpd;
- const pulse = num(input.pulse);
- if (pulse !== undefined) payload.pulse = pulse;
- const respiration = num(input.respiration);
- if (respiration !== undefined) payload.respiration = respiration;
- const spo2 = num(input.oxygenSaturation);
- if (spo2 !== undefined) payload.oxygen_saturation = spo2;
+ const set = setDefined(payload);
+
+ set("bps", num(input.systolic));
+ set("bpd", num(input.diastolic));
+ set("pulse", num(input.pulse));
+ set("respiration", num(input.respiration));
+ set("oxygen_saturation", num(input.oxygenSaturation));
 
  const weightKg = num(input.weightKg);
  const weightLb =
   weightKg !== undefined
    ? round(convert(weightKg).from("kg").to("lb"), 2)
    : undefined;
- if (weightLb !== undefined) payload.weight = weightLb;
+ set("weight", weightLb);
  const heightCm = num(input.heightCm);
  const heightIn =
   heightCm !== undefined
    ? round(convert(heightCm).from("cm").to("in"), 2)
    : undefined;
- if (heightIn !== undefined) payload.height = heightIn;
+ set("height", heightIn);
  // OpenEMR's UI computes BMI client-side (703 * lb / in²) and only then stores
  // it; the REST vital insert skips that, so replicate it here.
  if (weightLb !== undefined && heightIn !== undefined && heightIn > 0) {
   const bmi = round((weightLb / (heightIn * heightIn)) * 703, 2);
   payload.BMI = bmi;
-  const status = bmiStatus(bmi);
-  if (status) payload.BMI_status = status;
+  set("BMI_status", bmiStatus(bmi));
  }
  const temperature = num(input.temperatureC);
- if (temperature !== undefined) {
-  payload.temperature = round(convert(temperature).from("C").to("F"), 1);
- }
+ set(
+  "temperature",
+  temperature !== undefined
+   ? round(convert(temperature).from("C").to("F"), 1)
+   : undefined,
+ );
  const waist = num(input.waistCircumference);
- if (waist !== undefined) {
-  payload.waist_circ = round(convert(waist).from("cm").to("in"), 2);
- }
+ set(
+  "waist_circ",
+  waist !== undefined ? round(convert(waist).from("cm").to("in"), 2) : undefined,
+ );
  const head = num(input.headCircumference);
- if (head !== undefined) {
-  payload.head_circ = round(convert(head).from("cm").to("in"), 2);
- }
+ set(
+  "head_circ",
+  head !== undefined ? round(convert(head).from("cm").to("in"), 2) : undefined,
+ );
 
- if (input.temperatureMethod) payload.temp_method = input.temperatureMethod;
- if (input.note) payload.note = input.note;
+ set("temp_method", input.temperatureMethod);
+ set("note", input.note);
 
  return payload;
 }
 
-// /**
-//  * Hand-rolled imperial/metric conversions, replaced by convert-units.
-//  * These were inlined in `buildVitalsPayload` before the library refactor:
-//  *
-//  *   const weight = num(input.weightKg);
-//  *   if (weight !== undefined) payload.weight = round(weight * 2.2046226218, 2); // kg -> lb
-//  *   const height = num(input.heightCm);
-//  *   if (height !== undefined) payload.height = round(height / 2.54, 2); // cm -> in
-//  *   const temperature = num(input.temperatureC);
-//  *   if (temperature !== undefined) {
-//  *    payload.temperature = round((temperature * 9) / 5 + 32, 1); // C -> F
-//  *   }
-//  *   const waist = num(input.waistCircumference);
-//  *   if (waist !== undefined) payload.waist_circ = round(waist / 2.54, 2); // cm -> in
-//  *   const head = num(input.headCircumference);
-//  *   if (head !== undefined) payload.head_circ = round(head / 2.54, 2); // cm -> in
-//  */
+/**
+ * Problem-list / allergy writes go through OpenEMR's Standard API, whose payload
+ * fields (`begdate`/`enddate`) differ from our camelCase API.
+ */
+export function buildConditionPayload(
+ input: ConditionInput,
+): Record<string, unknown> {
+ return {
+  title: input.title,
+  begdate: input.beginDate,
+  enddate: input.endDate ?? "",
+  diagnosis: input.diagnosis ?? "",
+ };
+}
+
+export function buildAllergyPayload(input: AllergyInput): Record<string, unknown> {
+ return {
+  ...buildConditionPayload(input),
+  comments: input.comments ?? "",
+ };
+}
+
+/**
+ * The medication list reuses the generic `lists` table; OpenEMR's controller
+ * injects `pid`/`type`, so only the clinical fields are sent here.
+ */
+export function buildMedicationPayload(
+ input: MedicationInput,
+): Record<string, unknown> {
+ return {
+  title: input.title,
+  begdate: input.beginDate ?? toDateString(new Date()),
+  enddate: input.endDate ?? "",
+  diagnosis: input.diagnosis ?? "",
+ };
+}

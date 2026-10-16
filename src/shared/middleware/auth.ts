@@ -49,7 +49,7 @@ export const withOpenEMR = async (
  const userId = req.user.userId;
  req.openemr = new OpenEMRClient(async (force?: boolean) => {
   const [token, err] = await getOpenEMRToken(userId, force);
-  if (err || !token) throw err ?? APIError.unauthorized();
+  if (err || !token) throw err;
   return token;
  });
  next();

@@ -7,10 +7,15 @@ import appointmentRouter from "@module/appointment/appointment.route.ts";
 import authRouter from "@module/auth/auth.route.ts";
 import doctorRouter from "@module/doctor/doctor.route.ts";
 import emrRouter from "@module/emr/emr.route.ts";
+import messagingRouter from "@module/messaging/messaging.route.ts";
+import notificationRouter from "@module/notification/notification.route.ts";
 import openemrRouter from "@module/openemr/openemr.route.ts";
 import patientRouter from "@module/patient/patient.route.ts";
+import prescriptionRouter from "@module/prescription/prescription.route.ts";
+import scheduleRouter from "@module/schedule/schedule.route.ts";
 import systemRouter from "@module/system/system.route.ts";
 import userRouter from "@module/user/user.route.ts";
+import waitlistRouter from "@module/waitlist/waitlist.route.ts";
 import spec, { options } from "@swagger/swagger.ts";
 import cors from "@app/cors.ts";
 import express, { type Express } from "express";
@@ -62,6 +67,11 @@ class App {
   this.app.use("/api/patients", patientRouter);
   this.app.use("/api/appointments", appointmentRouter);
   this.app.use("/api/emr", emrRouter);
+  this.app.use("/api/prescriptions", prescriptionRouter);
+  this.app.use("/api/schedules", scheduleRouter);
+  this.app.use("/api/waitlist", waitlistRouter);
+  this.app.use("/api/conversations", messagingRouter);
+  this.app.use("/api/notifications", notificationRouter);
   this.app.use("/api/openemr", openemrRouter);
 
   this.app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(spec, options));

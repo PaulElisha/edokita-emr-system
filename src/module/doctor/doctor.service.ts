@@ -1,5 +1,6 @@
 /** @format */
 import {
+ mapPatient,
  mapPractitioner,
  type MappedPractitioner,
 } from "@shared/utils/fhir-mapper.ts";
@@ -20,9 +21,11 @@ import {
  fhirListQuerySchema,
  nameSchema,
 } from "@shared/schemas/common.ts";
-import type { FhirPractitioner } from "@shared/types/fhir.ts";
+import type { FhirPatient, FhirPractitioner } from "@shared/types/fhir.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
+import { findConnectedPatientIds } from "@module/doctor/helper.ts";
+import type { PatientListResult } from "@module/patient/patient.service.ts";
 import { z } from "zod";
 
 export const doctorListQuerySchema = fhirListQuerySchema.extend({
@@ -120,7 +123,10 @@ class DoctorService {
     "Practitioner",
     id,
    );
-   return [applyPractitionerProfile(mapPractitioner(practitioner), profiles), null];
+   return [
+    applyPractitionerProfile(mapPractitioner(practitioner), profiles),
+    null,
+   ];
   } catch (e) {
    return [null, toError(e)];
   }
@@ -139,6 +145,23 @@ class DoctorService {
    );
    const profiles = await fetchPractitionerProfiles();
    return [applyPractitionerProfile(mapPractitioner(updated), profiles), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ myPatients = async (
+  client: OpenEMRClient,
+  userId: string,
+ ): Promise<Result<PatientListResult>> => {
+  try {
+   const [ids, err] = await findConnectedPatientIds(client, userId);
+   if (err || !ids) return [null, err];
+   const patients = await Promise.all(
+    ids.map((id) => client.fhirRead<FhirPatient>("Patient", id)),
+   );
+   const items = patients.map(mapPatient);
+   return [{ total: items.length, items }, null];
   } catch (e) {
    return [null, toError(e)];
   }

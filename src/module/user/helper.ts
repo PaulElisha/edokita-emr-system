@@ -6,6 +6,7 @@ import { roles, roleSchema, type UserRole } from "@db/schema/role.ts";
 import { users } from "@db/schema/user.ts";
 import APIError from "@error/APIError.ts";
 import type { Result } from "@shared/types.ts";
+import { setDefined } from "@shared/utils/object.ts";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -110,6 +111,54 @@ export async function findUserById(
  return [toUser({ ...row.user, role: row.role as UserRole }), null];
 }
 
+/** Finds the app user linked to an OpenEMR patient uuid (if any). */
+export async function findUserByPatientId(
+ patientId: string,
+): Promise<Result<User>> {
+ const [row] = await db
+  .select({ user: users, role: roles.name })
+  .from(users)
+  .innerJoin(roles, eq(users.roleId, roles.id))
+  .where(eq(users.openemrPatientId, patientId))
+  .limit(1);
+ if (!row) return [null, APIError.notFound("User not found")];
+ return [toUser({ ...row.user, role: row.role as UserRole }), null];
+}
+
+/** Finds the app user linked to an OpenEMR practitioner uuid (if any). */
+export async function findUserByPractitionerId(
+ practitionerId: string,
+): Promise<Result<User>> {
+ const [row] = await db
+  .select({ user: users, role: roles.name })
+  .from(users)
+  .innerJoin(roles, eq(users.roleId, roles.id))
+  .where(eq(users.openemrPractitionerId, practitionerId))
+  .limit(1);
+ if (!row) return [null, APIError.notFound("User not found")];
+ return [toUser({ ...row.user, role: row.role as UserRole }), null];
+}
+
+/**
+ * Resolves the OpenEMR practitioner uuid linked to a doctor's account.
+ */
+export async function findUserPractitionerId(
+ userId: string,
+): Promise<Result<string>> {
+ const [user, err] = await findUserById(userId);
+ if (err || !user) return [null, err];
+ const practitionerId = user.openemr.practitionerId;
+ if (!practitionerId) {
+  return [
+   null,
+   APIError.badRequest(
+    "Your account is not linked to an OpenEMR practitioner record",
+   ),
+  ];
+ }
+ return [practitionerId, null];
+}
+
 export async function createUser(
  input: CreateUserInput,
 ): Promise<Result<User>> {
@@ -153,12 +202,11 @@ export async function linkOpenEMR(
  client: DbClient = db,
 ): Promise<Result<User>> {
  const patch: Partial<UserRow> = {};
- if (link.subject !== undefined) patch.openemrSubject = link.subject;
- if (link.fhirUser !== undefined) patch.openemrFhirUser = link.fhirUser;
- if (link.patientId !== undefined) patch.openemrPatientId = link.patientId;
- if (link.practitionerId !== undefined) {
-  patch.openemrPractitionerId = link.practitionerId;
- }
+ const set = setDefined(patch);
+ set("openemrSubject", link.subject);
+ set("openemrFhirUser", link.fhirUser);
+ set("openemrPatientId", link.patientId);
+ set("openemrPractitionerId", link.practitionerId);
  return applyUserPatch(id, patch, client);
 }
 
@@ -167,10 +215,25 @@ export async function updateUser(
  input: UpdateUserInput,
 ): Promise<Result<User>> {
  const patch: Partial<UserRow> = {};
- if (input.firstName !== undefined) patch.firstName = input.firstName;
- if (input.lastName !== undefined) patch.lastName = input.lastName;
- if (input.clinicId !== undefined) patch.clinicId = input.clinicId;
+ const set = setDefined(patch);
+ set("firstName", input.firstName);
+ set("lastName", input.lastName);
+ set("clinicId", input.clinicId);
  return applyUserPatch(id, patch);
+}
+
+/** Persists a new password hash for a user (password change/reset flows). */
+export async function updatePasswordHash(
+ id: string,
+ passwordHash: string,
+): Promise<Result<void>> {
+ const [row] = await db
+  .update(users)
+  .set({ passwordHash })
+  .where(eq(users.id, id))
+  .returning({ id: users.id });
+ if (!row) return [null, APIError.notFound("User not found")];
+ return [undefined, null];
 }
 
 /** Applies a partial update and returns the refreshed user (no-op if empty). */

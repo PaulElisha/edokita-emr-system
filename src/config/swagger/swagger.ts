@@ -2,7 +2,13 @@
 /** OpenAPI 3.0 spec describing our own hospital-management API. */
 import { Env } from "@/env.ts";
 import { z, type ZodObject, type ZodType } from "zod";
-import { registerSchema } from "@module/auth/auth.service.ts";
+import { registerSchema, loginSchema } from "@module/auth/auth.service.ts";
+import {
+ changePasswordSchema,
+ forgotPasswordSchema,
+ refreshTokenSchema,
+ resetPasswordSchema,
+} from "@module/auth/auth.service.ts";
 import {
  doctorBodySchema,
  doctorListQuerySchema,
@@ -14,15 +20,41 @@ import {
 import {
  appointmentBodySchema,
  appointmentListQuerySchema,
+ appointmentUpdateSchema,
  slotsQuerySchema,
 } from "@module/appointment/appointment.service.ts";
 import {
+ allergyBodySchema,
+ conditionBodySchema,
+ emrClinicalItemParamSchema,
  emrClinicalParamSchema,
  emrEncounterParamSchema,
  emrPatientParamSchema,
+ emrSoapNoteParamSchema,
+ emrVitalItemParamSchema,
  encounterBodySchema,
+ medicationBodySchema,
+ soapNoteBodySchema,
  vitalsBodySchema,
 } from "@module/emr/emr.service.ts";
+import {
+ prescriptionBodySchema,
+ prescriptionListQuerySchema,
+} from "@module/prescription/prescription.service.ts";
+import {
+ practitionerParamSchema,
+ scheduleBodySchema,
+} from "@module/schedule/schedule.service.ts";
+import {
+ waitlistBodySchema,
+ waitlistQuerySchema,
+} from "@module/waitlist/waitlist.service.ts";
+import {
+ messageBodySchema,
+ threadBodySchema,
+ threadListQuerySchema,
+} from "@module/messaging/messaging.service.ts";
+import { notificationQuerySchema } from "@module/notification/notification.service.ts";
 import { updateUserSchema } from "@module/user/helper.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
 
@@ -160,6 +192,30 @@ const spec = {
      items: { type: "array", items: schemaRef("Practitioner") },
     },
    },
+   Patient: {
+    type: "object",
+    properties: {
+     id: { type: "string" },
+     resourceType: { type: "string", example: "Patient" },
+     given: { type: "string" },
+     family: { type: "string" },
+     fullName: { type: "string" },
+     gender: { type: "string" },
+     birthDate: { type: "string", format: "date" },
+     ageYears: { type: "integer" },
+     active: { type: "boolean" },
+     phone: { type: "string" },
+     email: { type: "string" },
+     address: schemaRef("PractitionerAddress"),
+    },
+   },
+   PatientList: {
+    type: "object",
+    properties: {
+     total: { type: "integer" },
+     items: { type: "array", items: schemaRef("Patient") },
+    },
+   },
   },
  },
  paths: {
@@ -176,6 +232,49 @@ const spec = {
    post: {
     tags: ["Auth"],
     summary: "Log in with email and password; returns an app session JWT",
+    requestBody: requestBody(loginSchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/auth/refresh": {
+   post: {
+    tags: ["Auth"],
+    summary: "Exchange a refresh token for a new access/refresh token pair",
+    requestBody: requestBody(refreshTokenSchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/auth/change-password": {
+   post: {
+    tags: ["Auth"],
+    summary: "Change the current user's password (revoke all sessions)",
+    security: [{ bearerAuth: [] }],
+    requestBody: requestBody(changePasswordSchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/auth/forgot-password": {
+   post: {
+    tags: ["Auth"],
+    summary:
+     "Request a password reset token (returned only outside production)",
+    requestBody: requestBody(forgotPasswordSchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/auth/reset-password": {
+   post: {
+    tags: ["Auth"],
+    summary: "Set a new password using a reset token",
+    requestBody: requestBody(resetPasswordSchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/auth/logout": {
+   post: {
+    tags: ["Auth"],
+    summary: "Revoke the current user's refresh tokens (log out)",
+    security: [{ bearerAuth: [] }],
     responses: { "200": { description: "OK" } },
    },
   },
@@ -292,18 +391,25 @@ const spec = {
     responses: { "200": jsonResponse("OK", "Practitioner") },
    },
   },
+  "/api/doctors/patients": {
+   get: {
+    tags: ["Doctors"],
+    summary: "List the calling doctor's connected patients",
+    responses: { "200": jsonResponse("OK", "PatientList") },
+   },
+  },
   "/api/patients": {
    get: {
     tags: ["Patients"],
     summary: "List patients (search by given/family/gender/birthDate)",
     parameters: paramsFrom(patientListQuerySchema, "query"),
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonResponse("OK", "PatientList") },
    },
    post: {
     tags: ["Patients"],
     summary: "Create a patient",
     requestBody: requestBody(patientBodySchema),
-    responses: { "201": { description: "Created" } },
+    responses: { "201": jsonResponse("Created", "Patient") },
    },
   },
   "/api/patients/{id}": {
@@ -311,7 +417,14 @@ const spec = {
     tags: ["Patients"],
     summary: "Get a patient by id",
     parameters: paramsFrom(idParamSchema, "path", true),
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonResponse("OK", "Patient") },
+   },
+   put: {
+    tags: ["Patients"],
+    summary: "Update a patient",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    requestBody: requestBody(patientBodySchema),
+    responses: { "200": jsonResponse("OK", "Patient") },
    },
   },
   "/api/appointments": {
@@ -347,7 +460,21 @@ const spec = {
   "/api/appointments/{id}": {
    get: {
     tags: ["Appointments"],
-    summary: "Get an appointment by id",
+    summary: "Get an appointment by id (local status overlay applied)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
+   patch: {
+    tags: ["Appointments"],
+    summary:
+     "Update appointment status, reschedule window or note (local overlay)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    requestBody: requestBody(appointmentUpdateSchema),
+    responses: { "200": { description: "OK" } },
+   },
+   delete: {
+    tags: ["Appointments"],
+    summary: "Cancel/remove an appointment (deletes upstream in OpenEMR)",
     parameters: paramsFrom(idParamSchema, "path", true),
     responses: { "200": { description: "OK" } },
    },
@@ -414,6 +541,251 @@ const spec = {
     parameters: paramsFrom(emrEncounterParamSchema, "path", true),
     requestBody: requestBody(vitalsBodySchema),
     responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/emr/{patientId}/encounters/{encounterId}/vitals/{vitalId}": {
+   put: {
+    tags: ["EMR"],
+    summary: "Update a recorded vital signs entry",
+    parameters: paramsFrom(emrVitalItemParamSchema, "path", true),
+    requestBody: requestBody(vitalsBodySchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/emr/{patientId}/conditions": {
+   post: {
+    tags: ["EMR"],
+    summary: "Record a problem/condition (ICD-10 coded) for a patient",
+    parameters: paramsFrom(emrPatientParamSchema, "path", true),
+    requestBody: requestBody(conditionBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/emr/{patientId}/conditions/{itemId}": {
+   put: {
+    tags: ["EMR"],
+    summary: "Update a recorded condition",
+    parameters: paramsFrom(emrClinicalItemParamSchema, "path", true),
+    requestBody: requestBody(conditionBodySchema),
+    responses: { "200": { description: "OK" } },
+   },
+   delete: {
+    tags: ["EMR"],
+    summary: "Delete a recorded condition",
+    parameters: paramsFrom(emrClinicalItemParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/emr/{patientId}/allergies": {
+   post: {
+    tags: ["EMR"],
+    summary: "Record an allergy/intolerance for a patient",
+    parameters: paramsFrom(emrPatientParamSchema, "path", true),
+    requestBody: requestBody(allergyBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/emr/{patientId}/allergies/{itemId}": {
+   put: {
+    tags: ["EMR"],
+    summary: "Update a recorded allergy",
+    parameters: paramsFrom(emrClinicalItemParamSchema, "path", true),
+    requestBody: requestBody(allergyBodySchema),
+    responses: { "200": { description: "OK" } },
+   },
+   delete: {
+    tags: ["EMR"],
+    summary: "Delete a recorded allergy",
+    parameters: paramsFrom(emrClinicalItemParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/emr/{patientId}/medications": {
+   post: {
+    tags: ["EMR"],
+    summary: "Record an active medication for a patient",
+    parameters: paramsFrom(emrPatientParamSchema, "path", true),
+    requestBody: requestBody(medicationBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/emr/{patientId}/medications/{itemId}": {
+   put: {
+    tags: ["EMR"],
+    summary: "Update a recorded medication",
+    parameters: paramsFrom(emrClinicalItemParamSchema, "path", true),
+    requestBody: requestBody(medicationBodySchema),
+    responses: { "200": { description: "OK" } },
+   },
+   delete: {
+    tags: ["EMR"],
+    summary: "Delete a recorded medication",
+    parameters: paramsFrom(emrClinicalItemParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/emr/{patientId}/encounters/{encounterId}/soap-notes": {
+   post: {
+    tags: ["EMR"],
+    summary: "Record a SOAP note on an encounter",
+    parameters: paramsFrom(emrEncounterParamSchema, "path", true),
+    requestBody: requestBody(soapNoteBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/emr/{patientId}/encounters/{encounterId}/soap-notes/{noteId}": {
+   put: {
+    tags: ["EMR"],
+    summary: "Update a SOAP note",
+    parameters: paramsFrom(emrSoapNoteParamSchema, "path", true),
+    requestBody: requestBody(soapNoteBodySchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/prescriptions": {
+   get: {
+    tags: ["Prescriptions"],
+    summary:
+     "List prescriptions (patients see only their own; staff need patient_uuid)",
+    parameters: paramsFrom(prescriptionListQuerySchema, "query"),
+    responses: { "200": { description: "OK" } },
+   },
+   post: {
+    tags: ["Prescriptions"],
+    summary: "Write a prescription to the patient's OpenEMR chart",
+    requestBody: requestBody(prescriptionBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/prescriptions/{id}": {
+   get: {
+    tags: ["Prescriptions"],
+    summary: "Get a prescription by id",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
+   delete: {
+    tags: ["Prescriptions"],
+    summary: "Delete a prescription",
+    parameters: [
+     ...paramsFrom(idParamSchema, "path", true),
+     {
+      name: "patientId",
+      in: "query",
+      required: false,
+      description: "Patient whose chart to remove the prescription from",
+      schema: { type: "string" },
+     },
+    ],
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/schedules/{practitionerId}": {
+   get: {
+    tags: ["Schedules"],
+    summary: "Working-hours schedule for a provider (OpenEMR fallback applied)",
+    parameters: paramsFrom(practitionerParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
+   put: {
+    tags: ["Schedules"],
+    summary: "Update the provider's working-hours schedule (full replacement)",
+    parameters: paramsFrom(practitionerParamSchema, "path", true),
+    requestBody: requestBody(scheduleBodySchema),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/waitlist": {
+   get: {
+    tags: ["Waitlist"],
+    summary: "List waitlist entries (patients see only their own)",
+    parameters: paramsFrom(waitlistQuerySchema, "query"),
+    responses: { "200": { description: "OK" } },
+   },
+   post: {
+    tags: ["Waitlist"],
+    summary: "Request an earlier appointment (patients book for themselves)",
+    requestBody: requestBody(waitlistBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/waitlist/{id}": {
+   delete: {
+    tags: ["Waitlist"],
+    summary: "Remove a waitlist entry",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/conversations": {
+   get: {
+    tags: ["Messaging"],
+    summary: "List conversation threads the caller participates in",
+    parameters: paramsFrom(threadListQuerySchema, "query"),
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
+   },
+   post: {
+    tags: ["Messaging"],
+    summary: "Start a conversation",
+    security: [{ bearerAuth: [] }],
+    requestBody: requestBody(threadBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/conversations/{id}/messages": {
+   get: {
+    tags: ["Messaging"],
+    summary: "List messages in a conversation",
+    parameters: [
+     ...paramsFrom(idParamSchema, "path", true),
+     ...paramsFrom(threadListQuerySchema, "query"),
+    ],
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
+   },
+   post: {
+    tags: ["Messaging"],
+    summary: "Send a message (notifies the other party)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    security: [{ bearerAuth: [] }],
+    requestBody: requestBody(messageBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/conversations/{id}/read": {
+   post: {
+    tags: ["Messaging"],
+    summary: "Mark a conversation as read",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/notifications": {
+   get: {
+    tags: ["Notifications"],
+    summary: "List the caller's notifications (optionally unread only)",
+    parameters: paramsFrom(notificationQuerySchema, "query"),
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/notifications/read-all": {
+   post: {
+    tags: ["Notifications"],
+    summary: "Mark every notification as read",
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/notifications/{id}/read": {
+   post: {
+    tags: ["Notifications"],
+    summary: "Mark a notification as read",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
    },
   },
  },

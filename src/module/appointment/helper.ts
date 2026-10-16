@@ -21,26 +21,18 @@ import {
  type MappedAppointment,
  type MappedParticipant,
 } from "@shared/utils/fhir-mapper.ts";
+import {
+ getOverrides,
+ overrideIsInactive,
+} from "@module/appointment/overlay.ts";
+import { resolveWorkingHours } from "@module/schedule/helper.ts";
 import { z } from "zod";
 
-// /**
-//  * Hand-rolled date math, replaced by date-fns (`addMinutes`,
-//  * `differenceInSeconds`, `isAfter`).
-//  */
-// function addMinutes(date: Date, minutes: number): Date {
-//  return new Date(date.getTime() + minutes * 60_000);
-// }
-//
-// function differenceInSeconds(a: Date, b: Date): number {
-//  return Math.round((a.getTime() - b.getTime()) / 1_000);
-// }
-//
-// function isAfter(a: Date, b: Date): boolean {
-//  return a.getTime() > b.getTime();
-// }
-
 const DEFAULT_DURATION_MINUTES = 30;
-const CANCELLED = new Set(["cancelled", "entered-in-error"]);
+
+/**
+ * Patient uuids a doctor is connected to through appointments.
+ */
 
 export interface AppointmentWindow {
  start: string;
@@ -77,7 +69,7 @@ export async function resolvePatientId(
  try {
   if (actor.role === "patient") {
    const [user, err] = await findUserById(actor.userId);
-   if (err || !user) return [null, err ?? APIError.unauthorized()];
+   if (err || !user) return [null, err];
    const patientId = user.openemr.patientId;
    if (!patientId) {
     return [
@@ -191,19 +183,6 @@ export async function resolveProviderId(
  }
 }
 
-export interface WorkingHours {
- start: string;
- end: string;
-}
-
-/** Working hours seam; replace with per-provider schedules when available. */
-export function getWorkingHours(
- _providerId: string,
- _date: Date,
-): WorkingHours {
- return { start: OpenEMR.workingHoursStart, end: OpenEMR.workingHoursEnd };
-}
-
 interface TimeWindow {
  start: number;
  end: number;
@@ -222,18 +201,27 @@ async function fetchBookedWindows(
    _count: 100,
   });
 
-  const windows = (bundle.entry ?? [])
+  const appointments = (bundle.entry ?? [])
    .map((e) => e.resource as FhirAppointment)
-   .filter((a) => a?.resourceType === "Appointment")
-   .filter((a) => !a.status || !CANCELLED.has(a.status))
-   .filter((a): a is FhirAppointment & { start: string } => Boolean(a.start))
+   .filter((a) => a?.resourceType === "Appointment");
+
+  const [overrides] = await getOverrides(
+   appointments.map((a) => a.id).filter((id): id is string => Boolean(id)),
+  );
+
+  const windows = appointments
    .map((a) => {
-    const start = new Date(a.start);
-    const end = a.end
-     ? new Date(a.end)
+    const override = a.id ? overrides?.get(a.id) : undefined;
+    if (override && overrideIsInactive(override.status)) return null;
+    const start = new Date(override?.start ?? a.start ?? 0);
+    if (Number.isNaN(start.getTime())) return null;
+    const rawEnd = override?.end ?? a.end;
+    const end = rawEnd
+     ? new Date(rawEnd)
      : addMinutes(start, DEFAULT_DURATION_MINUTES);
     return { start: start.getTime(), end: end.getTime() };
-   });
+   })
+   .filter((w): w is TimeWindow => w !== null);
 
   return [windows, null];
  } catch (e) {
@@ -261,7 +249,7 @@ export async function assertNoConflict(
    doctorId,
    toDateString(new Date(window.start)),
   );
-  if (err || !booked) return [null, err ?? toError("Failed to load bookings")];
+  if (err || !booked) return [null, err];
 
   if (booked.some((b) => overlaps(proposed, b))) {
    return [
@@ -289,9 +277,17 @@ export async function computeSlots(
  query: SlotsQuery,
 ): Promise<Result<Slot[]>> {
  try {
-  const slotMinutes = query.slotMinutes ?? DEFAULT_DURATION_MINUTES;
   const [year, month, day] = query.date.split("-").map(Number);
-  const hours = getWorkingHours(query.doctorId, new Date(year, month - 1, day));
+  const [schedule, serr] = await resolveWorkingHours(
+   query.doctorId,
+   new Date(year, month - 1, day),
+  );
+  if (serr || !schedule) {
+   return [null, serr];
+  }
+  const slotMinutes =
+   query.slotMinutes ?? schedule.slotMinutes ?? DEFAULT_DURATION_MINUTES;
+  const hours = { start: schedule.start, end: schedule.end };
   const [startHour, startMinute] = hours.start.split(":").map(Number);
   const [endHour, endMinute] = hours.end.split(":").map(Number);
 
@@ -301,7 +297,7 @@ export async function computeSlots(
    query.doctorId,
    query.date,
   );
-  if (err || !booked) return [null, err ?? toError("Failed to load bookings")];
+  if (err || !booked) return [null, err];
 
   const slots: Slot[] = [];
   for (

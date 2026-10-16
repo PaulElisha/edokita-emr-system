@@ -1,5 +1,4 @@
 /** @format */
-import APIError from "@error/APIError.ts";
 import { getTokens } from "@module/auth/helper.ts";
 import type { Result } from "@shared/types.ts";
 import {
@@ -22,7 +21,7 @@ export interface UserProfile {
 class UserService {
  profile = async (userId: string): Promise<Result<UserProfile>> => {
   const [user, err] = await findUserById(userId);
-  if (err || !user) return [null, err ?? APIError.unauthorized()];
+  if (err || !user) return [null, err];
   const [tokens] = await getTokens(userId);
   return [
    {

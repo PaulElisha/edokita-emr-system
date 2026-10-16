@@ -57,7 +57,7 @@ class PatientService {
    if (query.search) params._content = query.search;
 
    const bundle = await client.fhirSearch("Patient", params);
-   const items = (bundle.entry ?? [])
+   let items = (bundle.entry ?? [])
     .map((e) => e.resource as FhirPatient)
     .filter((r) => r?.resourceType === "Patient")
     .map(mapPatient);

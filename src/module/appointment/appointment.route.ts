@@ -6,6 +6,7 @@ import AppointmentController from "@module/appointment/appointment.controller.ts
 import {
  appointmentBodySchema,
  appointmentListQuerySchema,
+ appointmentUpdateSchema,
  slotsQuerySchema,
 } from "@module/appointment/appointment.service.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
@@ -58,6 +59,23 @@ class AppointmentRouter {
    requireRole("admin", "doctor", "patient"),
    validate(appointmentBodySchema),
    AppointmentController.create,
+  );
+  this.router.patch(
+   "/:id",
+   authenticate,
+   withOpenEMR,
+   requireRole("admin", "doctor", "patient"),
+   validate(idParamSchema, "params"),
+   validate(appointmentUpdateSchema),
+   AppointmentController.updateAppointment,
+  );
+  this.router.delete(
+   "/:id",
+   authenticate,
+   withOpenEMR,
+   requireRole("admin", "doctor", "patient"),
+   validate(idParamSchema, "params"),
+   AppointmentController.remove,
   );
  }
 }

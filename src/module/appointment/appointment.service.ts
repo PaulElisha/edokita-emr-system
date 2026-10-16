@@ -24,9 +24,18 @@ import {
  type BookingActor,
  type Slot,
 } from "@module/appointment/helper.ts";
+import {
+ applyOverride,
+ applyOverrideById,
+ applyOverrides,
+ removeOverride,
+ upsertOverride,
+ type OverrideInput,
+} from "@module/appointment/overlay.ts";
 import type { FhirAppointment } from "@shared/types/fhir.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
+import { setDefined } from "@shared/utils/object.ts";
 import { resolvePatientPid } from "@module/patient/helper.ts";
 
 export const appointmentListQuerySchema = z.object({
@@ -73,6 +82,34 @@ export const slotsQuerySchema = z.object({
 });
 export type SlotsQuery = z.infer<typeof slotsQuerySchema>;
 
+/** FHIR Appointment.status values accepted as local lifecycle overrides. */
+export const appointmentStatusSchema = z.enum([
+ "proposed",
+ "pending",
+ "booked",
+ "arrived",
+ "fulfilled",
+ "cancelled",
+ "noshow",
+ "entered-in-error",
+ "checked-in",
+ "waitlist",
+]);
+export type AppointmentStatus = z.infer<typeof appointmentStatusSchema>;
+
+export const appointmentUpdateSchema = z
+ .object({
+  status: appointmentStatusSchema.optional(),
+  start: z.string().min(1).optional(),
+  end: z.string().optional(),
+  durationMinutes: z.coerce.number().int().min(5).max(600).optional(),
+  note: z.string().optional(),
+ })
+ .refine((v) => Object.values(v).some((x) => x !== undefined), {
+  message: "At least one field must be provided",
+ });
+export type UpdateAppointmentInput = z.infer<typeof appointmentUpdateSchema>;
+
 export type AppointmentListResult = ListResult<MappedAppointment>;
 
 class AppointmentService {
@@ -86,11 +123,10 @@ class AppointmentService {
     _count: query._count ?? 100,
    };
    if (query.date) params.date = query.date;
-   if (query.status) params.status = query.status;
 
    if (actor.role === "patient") {
     const [ownId, err] = await resolvePatientId(client, {}, actor);
-    if (err || !ownId) return [null, err ?? APIError.unauthorized()];
+    if (err || !ownId) return [null, err];
     params.patient = ownId;
    } else {
     if (query.patient) params.patient = query.patient;
@@ -98,12 +134,19 @@ class AppointmentService {
    }
 
    const bundle = await client.fhirSearch("Appointment", params);
-   const items = (bundle.entry ?? [])
+   const mapped = (bundle.entry ?? [])
     .map((e) => e.resource as FhirAppointment)
     .filter((r) => r?.resourceType === "Appointment")
     .map(mapAppointment);
 
-   return [{ total: bundle.total ?? items.length, items }, null];
+   const [items, err] = await applyOverrides(mapped);
+   if (err || !items) return [null, err];
+
+   const filtered = query.status
+    ? items.filter((a) => a.status === query.status)
+    : items;
+
+   return [{ total: bundle.total ?? filtered.length, items: filtered }, null];
   } catch (e) {
    return [null, toError(e)];
   }
@@ -122,12 +165,98 @@ class AppointmentService {
    const mapped = mapAppointment(appointment);
    if (actor.role === "patient") {
     const [ownId, err] = await resolvePatientId(client, {}, actor);
-    if (err || !ownId) return [null, err ?? APIError.unauthorized()];
+    if (err || !ownId) return [null, err];
     if (mapped.patientId !== ownId) {
      return [null, APIError.notFound("Appointment not found")];
     }
    }
-   return [mapped, null];
+   return applyOverrideById(mapped);
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ updateAppointment = async (
+  client: OpenEMRClient,
+  id: string,
+  input: UpdateAppointmentInput,
+  actor: BookingActor,
+ ): Promise<Result<MappedAppointment>> => {
+  try {
+   const appointment = await client.fhirRead<FhirAppointment>(
+    "Appointment",
+    id,
+   );
+   const mapped = mapAppointment(appointment);
+   if (actor.role === "patient") {
+    const [ownId, err] = await resolvePatientId(client, {}, actor);
+    if (err || !ownId) return [null, err];
+    if (mapped.patientId !== ownId) {
+     return [null, APIError.notFound("Appointment not found")];
+    }
+   }
+
+   const override: OverrideInput = {};
+   const set = setDefined(override);
+   set("status", input.status);
+   set("note", input.note);
+   if (input.start) {
+    const window = appointmentWindow({
+     start: input.start,
+     end: input.end,
+     durationMinutes: input.durationMinutes,
+    });
+    override.start = new Date(window.start);
+    override.end = new Date(window.end);
+   }
+
+   const [row, err] = await upsertOverride(id, override, actor.userId);
+   if (err || !row) return [null, err];
+
+   return [applyOverride(mapped, row), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ remove = async (
+  client: OpenEMRClient,
+  id: string,
+  actor: BookingActor,
+ ): Promise<Result<{ success: true }>> => {
+  try {
+   const appointment = await client.fhirRead<FhirAppointment>(
+    "Appointment",
+    id,
+   );
+   const mapped = mapAppointment(appointment);
+   if (actor.role === "patient") {
+    const [ownId, err] = await resolvePatientId(client, {}, actor);
+    if (err || !ownId) return [null, err];
+    if (mapped.patientId !== ownId) {
+     return [null, APIError.notFound("Appointment not found")];
+    }
+   }
+   if (!mapped.patientId) {
+    return [null, APIError.badRequest("Appointment has no patient")];
+   }
+
+   const [pid, pe] = await resolvePatientPid(client, mapped.patientId);
+   if (pe || !pid) {
+    return [null, pe];
+   }
+
+   const rows = await client.standardGet<{ pc_eid?: string | number; pc_uuid?: string }>(
+    `/api/patient/${pid}/appointment`,
+   );
+   const match = rows.find((r) => r.pc_uuid === id);
+   if (!match?.pc_eid) {
+    return [null, APIError.notFound("Appointment not found")];
+   }
+
+   await client.standardDelete(`/api/patient/${pid}/appointment/${match.pc_eid}`);
+   await removeOverride(id);
+   return [{ success: true }, null];
   } catch (e) {
    return [null, toError(e)];
   }
@@ -141,7 +270,7 @@ class AppointmentService {
   try {
    const [patientId, err] = await resolvePatientId(client, input, actor);
    if (err || !patientId) {
-    return [null, err ?? APIError.internalServer("Failed to resolve patient")];
+    return [null, err];
    }
    const window = appointmentWindow(input);
    if (input.doctorId) {
@@ -151,7 +280,7 @@ class AppointmentService {
 
    const [pid, pe] = await resolvePatientPid(client, patientId);
    if (pe || !pid) {
-    return [null, pe ?? APIError.internalServer("Failed to resolve patient")];
+    return [null, pe];
    }
 
    // A provider directory read is shared/read-only, so resolve it with the service
@@ -160,7 +289,7 @@ class AppointmentService {
    if (input.doctorId) {
     const [provider, per] = await resolveProviderId(openemr, input.doctorId);
     if (per || !provider) {
-     return [null, per ?? APIError.badRequest("Invalid doctorId")];
+     return [null, per];
     }
     providerId = provider;
    }

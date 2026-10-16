@@ -17,6 +17,13 @@ export type AdminUser = Record<string, unknown>;
 
 export type AdminFacility = Record<string, unknown>;
 
+export interface CreateAdminInput {
+ fname?: string;
+ lname?: string;
+ email?: string;
+ phone?: string;
+}
+
 class AdminService {
  stats = async (client: OpenEMRClient): Promise<Result<AdminStats>> => {
   const [

@@ -1,6 +1,5 @@
 /** @format */
 import { OpenEMR } from "@/env.ts";
-import APIError from "@error/APIError.ts";
 import {
  codeChallenge,
  codeVerifier,
@@ -35,9 +34,9 @@ export const ROLE_SCOPES: Record<string, string> = {
  patient:
   "openid offline_access api:fhir api:oemr patient/Patient.read patient/Observation.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Immunization.read patient/Procedure.read patient/Encounter.read patient/Appointment.read",
  doctor:
-  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Appointment.read user/appointment.cruds user/encounter.crus user/vital.crus user/list.r",
+  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Appointment.read user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus",
  admin:
-  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Practitioner.read user/Practitioner.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Appointment.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r",
+  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Practitioner.read user/Practitioner.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Appointment.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus",
 };
 
 export const callbackQuerySchema = z.object({
@@ -77,7 +76,7 @@ class OpenEMRService {
   userId: string,
  ): Promise<Result<AuthorizeResult>> => {
   const [user, err] = await findUserById(userId);
-  if (err || !user) return [null, err ?? APIError.unauthorized()];
+  if (err || !user) return [null, err];
   const state = randomState();
   const nonce = randomNonce();
   const verifier = codeVerifier();
@@ -109,13 +108,10 @@ class OpenEMRService {
   try {
    const [pending, err] = await takePending(state);
    if (err || !pending) {
-    return [
-     null,
-     err ?? APIError.badRequest("Invalid or expired authorization state"),
-    ];
+    return [null, err];
    }
    const [user, er] = await findUserById(pending.userId);
-   if (er || !user) return [null, er ?? APIError.unauthorized()];
+   if (er || !user) return [null, er];
 
    const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -127,7 +123,7 @@ class OpenEMRService {
    });
    const [data, error] = await tokenRequest(body);
    if (error || !data) {
-    return [null, error ?? APIError.openEmr("OpenEMR token request failed")];
+    return [null, error];
    }
 
    await this.persistConnection(user, data);
@@ -144,11 +140,11 @@ class OpenEMRService {
  ): Promise<void> {
   const [tokens, err] = toTokenSet(data);
   if (err || !tokens) {
-   throw err ?? APIError.openEmr("Failed to build token set");
+   throw err;
   }
 
   const [claims, error] = decodeIdTokenClaims(data.id_token);
-  if (error || !claims) throw error ?? APIError.openEmr("Invalid id_token");
+  if (error || !claims) throw error;
 
   const link: OpenEMRLinkUpdate = {};
   if (claims.subject) link.subject = claims.subject;

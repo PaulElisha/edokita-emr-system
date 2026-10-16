@@ -1,18 +1,17 @@
 /** @format */
-import APIError from "@error/APIError.ts";
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import AuthService, {
+ type ChangePasswordInput,
+ type ForgotPasswordInput,
  type LoginInput,
+ type RefreshTokenInput,
  type RegisterInput,
+ type ResetPasswordInput,
 } from "@module/auth/auth.service.ts";
+import { requireUserId } from "@module/auth/helper.ts";
 import HttpStatus from "@shared/enum/http.ts";
+import type { AuthRequest } from "@shared/http.ts";
 import type { Request, Response } from "express";
-
-function userId(req: { user?: JwtPayload }): string {
- if (!req.user) throw APIError.unauthorized();
- return req.user.userId;
-}
 
 class AuthController {
  register = asyncHandler(
@@ -31,11 +30,49 @@ class AuthController {
   },
  );
 
- logout = asyncHandler(async (req: Request, res: Response) => {
-  const [data, err] = await AuthService.logout(userId(req));
+ logout = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const [data, err] = await AuthService.logout(requireUserId(req));
   if (err) throw err;
   res.json(data);
  });
+
+ refresh = asyncHandler(
+  async (req: Request<unknown, unknown, RefreshTokenInput>, res: Response) => {
+   const [data, err] = await AuthService.refresh(req.body);
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
+
+ changePassword = asyncHandler(
+  async (
+   req: AuthRequest<unknown, unknown, ChangePasswordInput>,
+   res: Response,
+  ) => {
+   const [data, err] = await AuthService.changePassword(requireUserId(req), req.body);
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
+
+ forgotPassword = asyncHandler(
+  async (
+   req: Request<unknown, unknown, ForgotPasswordInput>,
+   res: Response,
+  ) => {
+   const [data, err] = await AuthService.forgotPassword(req.body);
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
+
+ resetPassword = asyncHandler(
+  async (req: Request<unknown, unknown, ResetPasswordInput>, res: Response) => {
+   const [data, err] = await AuthService.resetPassword(req.body);
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
 }
 
 export default new AuthController();

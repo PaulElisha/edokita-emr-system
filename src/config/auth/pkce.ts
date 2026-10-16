@@ -26,37 +26,3 @@ export function codeChallenge(verifier: string): Promise<string> {
  return calculatePKCECodeChallenge(verifier);
 }
 
-// /**
-//  * Hand-rolled PKCE helpers, replaced by oauth4webapi (`generateRandomState`,
-//  * `generateRandomNonce`, `generateRandomCodeVerifier`,
-//  * `calculatePKCECodeChallenge`).
-//  */
-// import { createHash, randomBytes } from "node:crypto";
-//
-// function base64url(input: Buffer): string {
-//  return input
-//   .toString("base64")
-//   .replace(/\+/g, "-")
-//   .replace(/\//g, "_")
-//   .replace(/=+$/, "");
-// }
-//
-// function randomString(bytes = 32): string {
-//  return base64url(randomBytes(bytes));
-// }
-//
-// export function randomState(): string {
-//  return randomString();
-// }
-//
-// export function randomNonce(): string {
-//  return randomString();
-// }
-//
-// export function codeVerifier(): string {
-//  return randomString(48);
-// }
-//
-// export function codeChallenge(verifier: string): string {
-//  return base64url(createHash("sha256").update(verifier).digest());
-// }

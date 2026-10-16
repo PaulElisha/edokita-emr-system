@@ -199,6 +199,36 @@ class OpenEMRClient {
   assertNoValidationError(env);
   return unwrapStandard<T>(env);
  }
+
+ /** Standard OpenEMR PUT; returns the wrapped data array. */
+ async standardPut<T = Record<string, unknown>>(
+  path: string,
+  body: Record<string, unknown>,
+ ): Promise<T[]> {
+  const env = await this.request<unknown>(this.apiBase, path, {
+   method: "PUT",
+   body,
+  });
+  assertNoValidationError(env);
+  return unwrapStandard<T>(env);
+ }
+
+ /**
+  * Standard OpenEMR DELETE; returns the wrapped data array. OpenEMR answers
+  * `200` even for a rejected/absent record, so validation messages are still
+  * inspected by `assertNoValidationError`.
+  */
+ async standardDelete<T = Record<string, unknown>>(
+  path: string,
+  query?: Record<string, QueryValue>,
+ ): Promise<T[]> {
+  const env = await this.request<unknown>(this.apiBase, path, {
+   method: "DELETE",
+   query,
+  });
+  assertNoValidationError(env);
+  return unwrapStandard<T>(env);
+ }
 }
 
 /**

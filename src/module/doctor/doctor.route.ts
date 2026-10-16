@@ -23,15 +23,23 @@ class DoctorRouter {
    "/",
    authenticate,
    withOpenEMR,
-   requireRole("admin", "doctor"),
+   requireRole("admin"),
    validate(doctorListQuerySchema, "query"),
    DoctorController.index,
   );
   this.router.get(
+   "/patients",
+   authenticate,
+   withOpenEMR,
+   requireRole("doctor"),
+   DoctorController.myPatients,
+  );
+
+  this.router.get(
    "/:id",
    authenticate,
    withOpenEMR,
-   requireRole("admin", "doctor"),
+   requireRole("admin"),
    validate(idParamSchema, "params"),
    DoctorController.show,
   );
@@ -47,7 +55,7 @@ class DoctorRouter {
    "/:id",
    authenticate,
    withOpenEMR,
-   requireRole("admin"),
+   requireRole("admin", "doctor"),
    validate(idParamSchema, "params"),
    validate(doctorBodySchema),
    DoctorController.update,

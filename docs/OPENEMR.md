@@ -107,7 +107,13 @@ OpenEMR needs a registered OAuth client so our backend can request tokens. In th
 - **Scope**: at minimum `openid`, `offline_access`, `api:fhir`, `api:oemr`. **This list is the
   ceiling** — every specific scope requested per flow (§8) must also appear here, or OpenEMR silently
   drops it. In particular, the standard‑API v2 scopes `user/list.r user/appointment.cruds
-  user/encounter.crus user/vital.crus user/user.rs user/facility.crus` must be registered.
+  user/encounter.crus user/vital.crus user/user.rs user/facility.crus` must be registered, **along with
+  the clinical‑write scopes** `user/medical_problem.cruds user/allergy.cruds user/medication.cruds
+  user/prescription.crds user/soap_note.crus` (used by the EMR write + e‑prescription endpoints).
+- **Deployed version is OpenEMR 8.4.1.** If you add a new scope to `OPENEMR_SCOPE`/`ROLE_SCOPES` you
+  must also add it here (and re‑mint per‑user tokens): the OAuth client only re‑mints on a `401`, but a
+  missing scope ceiling surfaces as a `403`, so existing sessions keep failing until the user
+  re‑authorizes (or the API is restarted for the service account).
 - Copy the generated **Client ID** and **Client Secret** into `.env`
   (`OPENEMR_CLIENT_ID`, `OPENEMR_CLIENT_SECRET`).
 

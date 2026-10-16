@@ -1,19 +1,27 @@
 /** @format */
 import asyncHandler from "@middleware/async-handler.ts";
-import type { Request, Response } from "express";
+import type { OpenEMRRequest } from "@shared/http.ts";
+import type { Response } from "express";
 import EmrService, {
+ type AllergyInput,
  type ClinicalKind,
+ type ConditionInput,
  type CreateEncounterInput,
+ type EmrClinicalItemParam,
  type EmrClinicalParam,
  type EmrEncounterParam,
  type EmrPatientParam,
+ type EmrSoapNoteParam,
+ type EmrVitalItemParam,
+ type MedicationInput,
  type RecordVitalsInput,
+ type SoapNoteInput,
 } from "@module/emr/emr.service.ts";
 
 class EmrController {
- summary = asyncHandler(async (req: Request<EmrPatientParam>, res: Response) => {
+ summary = asyncHandler(async (req: OpenEMRRequest<EmrPatientParam>, res: Response) => {
   const [data, err] = await EmrService.summary(
-   req.openemr!,
+   req.openemr,
    req.params.patientId,
   );
   if (err) throw err;
@@ -21,9 +29,9 @@ class EmrController {
  });
 
  clinical = asyncHandler(
-  async (req: Request<EmrClinicalParam>, res: Response) => {
+  async (req: OpenEMRRequest<EmrClinicalParam>, res: Response) => {
    const [data, err] = await EmrService.clinical(
-    req.openemr!,
+    req.openemr,
     req.params.patientId,
     req.params.kind as ClinicalKind,
    );
@@ -32,9 +40,9 @@ class EmrController {
   },
  );
 
- vitals = asyncHandler(async (req: Request<EmrPatientParam>, res: Response) => {
+ vitals = asyncHandler(async (req: OpenEMRRequest<EmrPatientParam>, res: Response) => {
   const [data, err] = await EmrService.observations(
-   req.openemr!,
+   req.openemr,
    req.params.patientId,
    "vital-signs",
   );
@@ -42,9 +50,9 @@ class EmrController {
   res.json({ success: true, data });
  });
 
- labs = asyncHandler(async (req: Request<EmrPatientParam>, res: Response) => {
+ labs = asyncHandler(async (req: OpenEMRRequest<EmrPatientParam>, res: Response) => {
   const [data, err] = await EmrService.observations(
-   req.openemr!,
+   req.openemr,
    req.params.patientId,
    "laboratory",
   );
@@ -53,9 +61,9 @@ class EmrController {
  });
 
  encounters = asyncHandler(
-  async (req: Request<EmrPatientParam>, res: Response) => {
+  async (req: OpenEMRRequest<EmrPatientParam>, res: Response) => {
    const [data, err] = await EmrService.clinical(
-    req.openemr!,
+    req.openemr,
     req.params.patientId,
     "encounters",
    );
@@ -65,9 +73,9 @@ class EmrController {
  );
 
  encounter = asyncHandler(
-  async (req: Request<EmrEncounterParam>, res: Response) => {
+  async (req: OpenEMRRequest<EmrEncounterParam>, res: Response) => {
    const [data, err] = await EmrService.encounter(
-    req.openemr!,
+    req.openemr,
     req.params.patientId,
     req.params.encounterId,
    );
@@ -78,11 +86,11 @@ class EmrController {
 
  createEncounter = asyncHandler(
   async (
-   req: Request<EmrPatientParam, unknown, CreateEncounterInput>,
+   req: OpenEMRRequest<EmrPatientParam, unknown, CreateEncounterInput>,
    res: Response,
   ) => {
    const [data, err] = await EmrService.createEncounter(
-    req.openemr!,
+    req.openemr,
     req.params.patientId,
     req.body,
    );
@@ -91,21 +99,197 @@ class EmrController {
   },
  );
 
- recordVitals = asyncHandler(
-  async (
-   req: Request<EmrEncounterParam, unknown, RecordVitalsInput>,
-   res: Response,
-  ) => {
-   const [data, err] = await EmrService.recordVitals(
-    req.openemr!,
-    req.params.patientId,
-    req.params.encounterId,
-    req.body,
-   );
-   if (err) throw err;
-   res.status(201).json({ success: true, data });
-  },
- );
+  recordVitals = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrEncounterParam, unknown, RecordVitalsInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.recordVitals(
+     req.openemr,
+     req.params.patientId,
+     req.params.encounterId,
+     req.body,
+    );
+    if (err) throw err;
+    res.status(201).json({ success: true, data });
+   },
+  );
+
+  updateVitals = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrVitalItemParam, unknown, RecordVitalsInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.updateVitals(
+     req.openemr,
+     req.params.patientId,
+     req.params.encounterId,
+     req.params.vitalId,
+     req.body,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
+
+  createCondition = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrPatientParam, unknown, ConditionInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.createCondition(
+     req.openemr,
+     req.params.patientId,
+     req.body,
+    );
+    if (err) throw err;
+    res.status(201).json({ success: true, data });
+   },
+  );
+
+  updateCondition = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrClinicalItemParam, unknown, ConditionInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.updateCondition(
+     req.openemr,
+     req.params.patientId,
+     req.params.itemId,
+     req.body,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
+
+  deleteCondition = asyncHandler(
+   async (req: OpenEMRRequest<EmrClinicalItemParam>, res: Response) => {
+    const [data, err] = await EmrService.deleteCondition(
+     req.openemr,
+     req.params.patientId,
+     req.params.itemId,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
+
+  createAllergy = asyncHandler(
+   async (req: OpenEMRRequest<EmrPatientParam, unknown, AllergyInput>, res: Response) => {
+    const [data, err] = await EmrService.createAllergy(
+     req.openemr,
+     req.params.patientId,
+     req.body,
+    );
+    if (err) throw err;
+    res.status(201).json({ success: true, data });
+   },
+  );
+
+  updateAllergy = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrClinicalItemParam, unknown, AllergyInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.updateAllergy(
+     req.openemr,
+     req.params.patientId,
+     req.params.itemId,
+     req.body,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
+
+  deleteAllergy = asyncHandler(
+   async (req: OpenEMRRequest<EmrClinicalItemParam>, res: Response) => {
+    const [data, err] = await EmrService.deleteAllergy(
+     req.openemr,
+     req.params.patientId,
+     req.params.itemId,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
+
+  createMedication = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrPatientParam, unknown, MedicationInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.createMedication(
+     req.openemr,
+     req.params.patientId,
+     req.body,
+    );
+    if (err) throw err;
+    res.status(201).json({ success: true, data });
+   },
+  );
+
+  updateMedication = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrClinicalItemParam, unknown, MedicationInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.updateMedication(
+     req.openemr,
+     req.params.patientId,
+     req.params.itemId,
+     req.body,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
+
+  deleteMedication = asyncHandler(
+   async (req: OpenEMRRequest<EmrClinicalItemParam>, res: Response) => {
+    const [data, err] = await EmrService.deleteMedication(
+     req.openemr,
+     req.params.patientId,
+     req.params.itemId,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
+
+  createSoapNote = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrEncounterParam, unknown, SoapNoteInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.createSoapNote(
+     req.openemr,
+     req.params.patientId,
+     req.params.encounterId,
+     req.body,
+    );
+    if (err) throw err;
+    res.status(201).json({ success: true, data });
+   },
+  );
+
+  updateSoapNote = asyncHandler(
+   async (
+    req: OpenEMRRequest<EmrSoapNoteParam, unknown, SoapNoteInput>,
+    res: Response,
+   ) => {
+    const [data, err] = await EmrService.updateSoapNote(
+     req.openemr,
+     req.params.patientId,
+     req.params.encounterId,
+     req.params.noteId,
+     req.body,
+    );
+    if (err) throw err;
+    res.json({ success: true, data });
+   },
+  );
 }
 
 export default new EmrController();

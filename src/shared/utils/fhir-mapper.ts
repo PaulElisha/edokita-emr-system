@@ -1,5 +1,5 @@
 /** Helpers to normalize FHIR resources into clean JSON for our API. */
-import { differenceInYears } from "date-fns";
+import { differenceInYears, isBefore } from "date-fns";
 import { IDENTIFIER_SYSTEM } from "@shared/utils/fhir.ts";
 import type {
   FhirAddress,
@@ -270,6 +270,27 @@ export function mapClinical(
   };
 }
 
+/**
+ * OpenEMR leaves `pc_apptstatus` at its default (`-` -> FHIR `proposed`) unless
+ * staff check a patient out, so a past appointment would otherwise report
+ * `proposed` forever. Keep genuinely terminal statuses and otherwise derive one
+ * from the appointment window.
+ */
+const TERMINAL_APPOINTMENT_STATUSES = new Set([
+ "cancelled",
+ "noshow",
+ "entered-in-error",
+ "fulfilled",
+]);
+
+function appointmentStatus(a: FhirAppointment): string | undefined {
+ if (!a.status) return undefined;
+ if (TERMINAL_APPOINTMENT_STATUSES.has(a.status)) return a.status;
+ const at = a.end ?? a.start;
+ if (!at) return a.status;
+ return isBefore(new Date(at), new Date()) ? "fulfilled" : "booked";
+}
+
 export function mapAppointment(a: FhirAppointment): MappedAppointment {
  const participants: MappedParticipant[] = (a.participant ?? []).map((p) => ({
   role: p.type?.[0]?.coding?.[0]?.code,
@@ -288,7 +309,7 @@ export function mapAppointment(a: FhirAppointment): MappedAppointment {
  return {
   id: a.id,
   resourceType: a.resourceType,
-  status: a.status,
+  status: appointmentStatus(a),
   start: a.start,
   end: a.end,
   type: conceptText(a.appointmentType),
@@ -322,14 +343,3 @@ export function calcAge(birthDate: string): number {
  return age < 0 ? 0 : age;
 }
 
-// /**
-//  * Hand-rolled age computation, replaced by date-fns `differenceInYears`.
-//  */
-// export function calcAge(birthDate: string): number {
-//  const dob = new Date(birthDate);
-//  const now = new Date();
-//  let age = now.getFullYear() - dob.getFullYear();
-//  const m = now.getMonth() - dob.getMonth();
-//  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
-//  return age < 0 ? 0 : age;
-// }

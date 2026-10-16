@@ -3,31 +3,31 @@ import { Env } from "@/env.ts";
 import APIError from "@error/APIError.ts";
 import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
+import type { AuthRequest, OpenEMRRequest } from "@shared/http.ts";
 import OpenEMRService, {
  type CallbackQuery,
 } from "@module/openemr/openemr.service.ts";
 import type { Request, Response } from "express";
 
-function userId(req: { user?: JwtPayload }): string {
- if (!req.user) throw APIError.unauthorized();
+function userId(req: { user: JwtPayload }): string {
  return req.user.userId;
 }
 
 class OpenEMRController {
- authorize = asyncHandler(async (req: Request, res: Response) => {
+ authorize = asyncHandler(async (req: AuthRequest, res: Response) => {
   const [data, err] = await OpenEMRService.startAuthorization(userId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });
 
- refresh = asyncHandler(async (req: Request, res: Response) => {
+ refresh = asyncHandler(async (req: AuthRequest, res: Response) => {
   const [data, err] = await OpenEMRService.refresh(userId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });
 
- ping = asyncHandler(async (req: Request, res: Response) => {
-  const data = await req.openemr!.standardGet("/api/version");
+ ping = asyncHandler(async (req: OpenEMRRequest, res: Response) => {
+  const data = await req.openemr.standardGet("/api/version");
   res.json({ success: true, data });
  });
 

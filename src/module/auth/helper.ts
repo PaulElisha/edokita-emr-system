@@ -2,17 +2,20 @@
 import { db } from "@db/db.ts";
 import type { DbClient } from "@db/transaction.ts";
 import { openemrAuthStates, openemrTokens } from "@db/schema/openemr.ts";
+import { passwordResetTokens, refreshTokens } from "@db/schema/auth.ts";
 import APIError from "@error/APIError.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
-import { decodeJwtPayload } from "@auth/jwt.ts";
+import { decodeJwtPayload, signAppToken, type JwtPayload } from "@auth/jwt.ts";
+import type { PublicUser } from "@module/user/helper.ts";
 import {
  authorizationServer,
  getClientAuth,
  oauthClient,
  oauthOptions,
 } from "@auth/oauth.ts";
-import { eq, lt } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
+import { createHash, randomBytes } from "node:crypto";
 import {
  ResponseBodyError,
  genericTokenEndpointRequest,
@@ -123,35 +126,6 @@ export async function tokenRequest(
  }
 }
 
-// /**
-//  * Hand-rolled token request, replaced by oauth4webapi
-//  * (`genericTokenEndpointRequest` + `processGenericTokenEndpointResponse`).
-//  */
-// export async function tokenRequest(
-//  body: URLSearchParams,
-// ): Promise<Result<TokenResponse>> {
-//  try {
-//   const res = await fetch(OpenEMR.oauthUrl, {
-//    method: "POST",
-//    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-//    body,
-//   });
-//   const data = await res.json();
-//   if (!res.ok || data.error || !data.access_token) {
-//    return [
-//     null,
-//     APIError.openEmr(
-//      `OpenEMR token request failed: ${data.error_description || data.error || res.status}`,
-//      res.status,
-//     ),
-//    ];
-//   }
-//   return [data, null];
-//  } catch (e) {
-//   return [null, toError(e)];
-//  }
-// }
-
 export interface IdTokenClaims {
  subject: string | null;
  fhirUser: string | null;
@@ -185,7 +159,7 @@ export function cleanScope(scope: string | null | undefined): string | null {
 export function toTokenSet(data: TokenResponse): Result<SaveTokenInput> {
  const [claims, err] = decodeIdTokenClaims(data.id_token);
  if (err || !claims) {
-  return [null, err ?? APIError.openEmr("Invalid id_token")];
+  return [null, err];
  }
  const ttlMs = (data.expires_in ?? 3600) * 1000;
  return [
@@ -224,11 +198,11 @@ export async function getOpenEMRToken(
   });
   const [data, er] = await tokenRequest(body);
   if (er || !data) {
-   return [null, er ?? APIError.openEmr("OpenEMR token request failed")];
+   return [null, er];
   }
   const [refreshed, error] = toTokenSet(data);
   if (error || !refreshed) {
-   return [null, error ?? APIError.openEmr("Failed to build token set")];
+   return [null, error];
   }
   const [, ex] = await saveTokens(userId, refreshed);
   if (ex) return [null, ex];
@@ -315,6 +289,171 @@ export async function takePending(state: string): Promise<Result<PendingAuth>> {
    },
    null,
   ];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+// ---------------------------------------------------------------------------
+// App session tokens (JWT access token + opaque refresh token)
+// ---------------------------------------------------------------------------
+
+const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const RESET_TTL_MS = 60 * 60 * 1000;
+
+export interface AuthResult {
+ user: PublicUser;
+ token: string;
+ refreshToken: string;
+}
+
+/** Extracts the authenticated user id from the request JWT payload. */
+export function requireUserId(req: { user: JwtPayload }): string {
+ return req.user.userId;
+}
+
+export interface IssuedRefreshToken {
+ token: string;
+ expiresAt: Date;
+}
+
+/** Opaque high-entropy token (raw value returned to the client once). */
+function generateToken(): string {
+ return randomBytes(32).toString("base64url");
+}
+
+/** Tokens are persisted hashed so a DB leak cannot be replayed. */
+function hashToken(raw: string): string {
+ return createHash("sha256").update(raw).digest("hex");
+}
+
+/** Mints an app access token + refresh token for a newly authenticated user. */
+export async function issueSession(
+ user: PublicUser,
+): Promise<Result<AuthResult>> {
+ const token = await signAppToken({
+  userId: user.id,
+  role: user.role,
+  email: user.email,
+ });
+ const [issued, err] = await issueRefreshToken(user.id);
+ if (err || !issued) return [null, err];
+ return [{ user, token, refreshToken: issued.token }, null];
+}
+
+export async function issueRefreshToken(
+ userId: string,
+): Promise<Result<IssuedRefreshToken>> {
+ try {
+  const token = generateToken();
+  const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
+  await db
+   .insert(refreshTokens)
+   .values({
+    userId,
+    tokenHash: hashToken(token),
+    revoked: false,
+    expiresAt,
+   });
+  return [{ token, expiresAt }, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+/** Validates a refresh token and returns its owning user id (not revoked/expired). */
+export async function verifyRefreshToken(
+ raw: string,
+): Promise<Result<string>> {
+ try {
+  const [row] = await db
+   .select()
+   .from(refreshTokens)
+   .where(
+    and(
+     eq(refreshTokens.tokenHash, hashToken(raw)),
+     eq(refreshTokens.revoked, false),
+    ),
+   )
+   .limit(1);
+  if (!row) return [null, APIError.unauthorized("Invalid refresh token")];
+  if (row.expiresAt.getTime() < Date.now()) {
+   return [null, APIError.unauthorized("Refresh token expired")];
+  }
+  return [row.userId, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+export async function revokeRefreshToken(raw: string): Promise<Result<void>> {
+ try {
+  await db
+   .update(refreshTokens)
+   .set({ revoked: true, revokedAt: new Date() })
+   .where(eq(refreshTokens.tokenHash, hashToken(raw)));
+  return [undefined, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+export async function revokeUserRefreshTokens(
+ userId: string,
+): Promise<Result<void>> {
+ try {
+  await db
+   .update(refreshTokens)
+   .set({ revoked: true, revokedAt: new Date() })
+   .where(
+    and(eq(refreshTokens.userId, userId), eq(refreshTokens.revoked, false)),
+   );
+  return [undefined, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+/** Issues a single-use password-reset token (raw value returned to the caller). */
+export async function issuePasswordResetToken(
+ userId: string,
+): Promise<Result<string>> {
+ try {
+  const token = generateToken();
+  const expiresAt = new Date(Date.now() + RESET_TTL_MS);
+  await db
+   .insert(passwordResetTokens)
+   .values({ userId, tokenHash: hashToken(token), expiresAt });
+  return [token, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+/** Consumes a reset token, returning the user id; marks the token used. */
+export async function consumePasswordResetToken(
+ raw: string,
+): Promise<Result<string>> {
+ try {
+  const [row] = await db
+   .select()
+   .from(passwordResetTokens)
+   .where(
+    and(
+     eq(passwordResetTokens.tokenHash, hashToken(raw)),
+     isNull(passwordResetTokens.usedAt),
+    ),
+   )
+   .limit(1);
+  if (!row) return [null, APIError.badRequest("Invalid or expired reset token")];
+  if (row.expiresAt.getTime() < Date.now()) {
+   return [null, APIError.badRequest("Invalid or expired reset token")];
+  }
+  await db
+   .update(passwordResetTokens)
+   .set({ usedAt: new Date() })
+   .where(eq(passwordResetTokens.id, row.id));
+  return [row.userId, null];
  } catch (e) {
   return [null, toError(e)];
  }

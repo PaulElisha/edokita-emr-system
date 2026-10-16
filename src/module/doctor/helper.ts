@@ -1,12 +1,19 @@
 /** @format */
 import type { CreateDoctorInput } from "@module/doctor/doctor.service.ts";
 import { openemr } from "@module/openemr/client.ts";
+import type OpenEMRClient from "@module/openemr/client.ts";
 import {
+ mapAppointment,
  type MappedPractitioner,
  type MappedQualification,
 } from "@shared/utils/fhir-mapper.ts";
 import { buildHumanName, buildTelecom, IDENTIFIER_SYSTEM } from "@shared/utils/fhir.ts";
+import type { Result } from "@shared/types.ts";
+import type { FhirAppointment } from "@shared/types/fhir.ts";
+import { toError } from "@shared/error/error.ts";
+import { findUserPractitionerId } from "@module/user/helper.ts";
 
+const CONNECTED_PATIENT_APPOINTMENT_FETCH = 500;
 interface UserProfileRecord {
  uuid?: string;
  specialty?: string | null;
@@ -114,4 +121,32 @@ export function applyPractitionerProfile(
   specialty,
   qualifications,
  };
+}
+
+export async function findConnectedPatientIds(
+ client: OpenEMRClient,
+ userId: string,
+): Promise<Result<string[]>> {
+ try {
+  const [practitionerId, err] = await findUserPractitionerId(userId);
+  if (err || !practitionerId) return [null, err];
+
+  const bundle = await client.fhirSearch("Appointment", {
+   _count: CONNECTED_PATIENT_APPOINTMENT_FETCH,
+  });
+  const ids = [
+   ...new Set(
+    (bundle.entry ?? [])
+     .map((e) => e.resource as FhirAppointment)
+     .filter((r) => r?.resourceType === "Appointment")
+     .map(mapAppointment)
+     .filter((a) => a.doctorId === practitionerId)
+     .map((a) => a.patientId)
+     .filter((id): id is string => Boolean(id)),
+   ),
+  ];
+  return [ids, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
 }

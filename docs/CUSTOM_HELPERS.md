@@ -14,6 +14,9 @@ reference, paired with the package and the exact call that replaced it.
 | 6 | OAuth token request | `src/module/auth/helper.ts` | `genericTokenEndpointRequest` + `processGenericTokenEndpointResponse` | `oauth4webapi ^3.8.8` |
 | 7 | Service token mint / cache | `src/shared/utils/openemr-auth.ts` | `genericTokenEndpointRequest` + `processGenericTokenEndpointResponse` + `remember` | `oauth4webapi ^3.8.8`, `@epic-web/remember ^1.1.0` |
 | 8 | BMI category lookup | `src/module/emr/helper.ts` | `BMI_CATEGORIES` lookup | *(local refactor, no package)* |
+| 9 | Inactivity check | `src/module/auth/helper.ts` | `isBefore` + `subDays` | `date-fns ^4.4.0` |
+| 10 | Opaque token generation | `src/module/auth/helper.ts` | `generateRandomState` | `oauth4webapi ^3.8.8` |
+| 11 | Secret encryption at rest | `src/shared/utils/secret.ts` | `CompactEncrypt` / `compactDecrypt` | `jose ^6.2.12` |
 
 ---
 
@@ -461,3 +464,128 @@ function bmiStatus(bmi: number): string | undefined {
 
 Behaviour is identical; the refactor only moved the bounds into data so the
 OpenEMR `BmiCategory` enum and the ladder cannot drift apart.
+
+---
+
+## 9. Inactivity check
+
+**Was in:** `src/module/auth/helper.ts`
+**Replaced by:** `date-fns` → `isBefore()` + `subDays()`
+
+```ts
+// original custom implementation
+const IDLE_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+
+export function isIdle(lastActivity: Date): boolean {
+ return Date.now() - lastActivity.getTime() >= IDLE_TTL_MS;
+}
+```
+
+```ts
+// current: src/module/auth/helper.ts
+import { isBefore, subDays } from "date-fns";
+
+const IDLE_WINDOW_DAYS = 3;
+
+export function isIdle(lastActivity: Date): boolean {
+ return isBefore(lastActivity, subDays(new Date(), IDLE_WINDOW_DAYS));
+}
+```
+
+The window is now expressed in calendar days rather than a hand-rolled
+millisecond product.
+
+---
+
+## 10. Opaque token generation
+
+**Was in:** `src/module/auth/helper.ts`
+**Replaced by:** `oauth4webapi` → `generateRandomState()`
+
+```ts
+// original custom implementation
+import { randomBytes } from "node:crypto";
+
+function generateToken(): string {
+ return randomBytes(32).toString("base64url");
+}
+```
+
+```ts
+// current: src/module/auth/helper.ts
+import { generateRandomState } from "oauth4webapi";
+
+function generateToken(): string {
+ return generateRandomState();
+}
+```
+
+`generateRandomState()` is the same 32 random bytes rendered as a base64url
+string (43 chars), so token entropy and wire format are unchanged. `hashToken`
+still uses `node:crypto`'s `createHash` — a one-line SHA-256 has no package
+equivalent worth adopting.
+
+---
+
+## 11. Secret encryption at rest
+
+**Was in:** `src/shared/utils/secret.ts`
+**Replaced by:** `jose` → `CompactEncrypt` / `compactDecrypt` (compact JWE,
+`dir` / `A256GCM`)
+
+```ts
+// original custom implementation (AES-256-GCM via node:crypto)
+const ENCRYPTED_PREFIX = "enc.v1.";
+
+function encryptionKey(): Buffer {
+ const material = Env.TOKEN_ENCRYPTION_KEY || Env.APP_JWT_PRIVATE_KEY ||
+  readFileSync(resolve(process.cwd(), "private-key.pem"), "utf8");
+ return createHash("sha256").update(material).digest();
+}
+
+export function encryptSecret(value: string): string {
+ const iv = randomBytes(12);
+ const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
+ const enc = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+ return `${ENCRYPTED_PREFIX}${Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64")}`;
+}
+
+export function decryptSecret(value: string): string {
+ if (!value.startsWith(ENCRYPTED_PREFIX)) return value;
+ const raw = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), "base64");
+ const iv = raw.subarray(0, 12), tag = raw.subarray(12, 28), data = raw.subarray(28);
+ const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), iv);
+ decipher.setAuthTag(tag);
+ return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+}
+```
+
+```ts
+// current: src/shared/utils/secret.ts
+import { CompactEncrypt, compactDecrypt } from "jose";
+
+function encryptionKey(): Uint8Array {
+ const material = Env.TOKEN_ENCRYPTION_KEY || Env.APP_JWT_PRIVATE_KEY ||
+  readFileSync(resolve(process.cwd(), "private-key.pem"), "utf8");
+ return new Uint8Array(createHash("sha256").update(material).digest());
+}
+
+export async function encryptSecret(value: string): Promise<string> {
+ return await new CompactEncrypt(new TextEncoder().encode(value))
+  .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+  .encrypt(encryptionKey());
+}
+
+export async function decryptSecret(value: string): Promise<string> {
+ if (value.split(".").length !== 5) return value;
+ const { plaintext } = await compactDecrypt(value, encryptionKey());
+ return new TextDecoder().decode(plaintext);
+}
+```
+
+`jose`'s API is asynchronous (`encrypt` / `compactDecrypt` return promises), so
+both helpers became `async`; the callers in `src/module/user/helper.ts`
+(`saveOpenEMRCredentials`, `getOpenEMRCredentials`) were updated to `await`. The
+key derivation is unchanged (SHA-256 of the same key material). Existing
+`enc.v1.*` rows in `app_users.openemr_password` were re-encrypted to the JWE
+format by a one-off migration before the legacy branch was dropped.

@@ -1,9 +1,11 @@
 /** @format */
 import OpenEMRClient, { openemr } from "@module/openemr/client.ts";
 import APIError from "@error/APIError.ts";
+import AppError from "@error/app-error.ts";
 import { verifyAppToken } from "@auth/jwt.ts";
 import { getOpenEMRToken } from "@module/auth/helper.ts";
 import { findUserById } from "@module/user/helper.ts";
+import { errors as jwtErrors } from "jose";
 import type { NextFunction, Request, Response } from "express";
 
 export const authenticate = async (
@@ -16,14 +18,31 @@ export const authenticate = async (
  if (scheme?.toLowerCase() !== "bearer" || !token) {
   return next(APIError.unauthorized());
  }
- verifyAppToken(token)
-  .then(async (payload) => {
-   const [user] = await findUserById(payload.userId);
-   if (!user) throw APIError.unauthorized();
-   req.user = payload;
-   return next();
-  })
-  .catch(next);
+ try {
+  // Full verification (signature, issuer, audience, expiry, required claims):
+  // any failure is an auth problem, not a server fault.
+  const payload = await verifyAppToken(token);
+  if (!payload.userId) {
+   return next(APIError.unauthorized("Invalid session token"));
+  }
+  const [user, err] = await findUserById(payload.userId);
+  if (err || !user) {
+   return next(APIError.unauthorized("Invalid session token"));
+  }
+  // Instant revocation: a token minted before the latest logout/password
+  // change carries a stale epoch and is rejected without any extra query.
+  if ((payload.sessionEpoch ?? 0) !== user.sessionEpoch) {
+   return next(APIError.unauthorized("Session no longer valid"));
+  }
+  req.user = payload;
+  return next();
+ } catch (e) {
+  if (e instanceof AppError) return next(e);
+  if (e instanceof jwtErrors.JWTExpired) {
+   return next(APIError.unauthorized("Session expired, please sign in again"));
+  }
+  return next(APIError.unauthorized("Invalid session token"));
+ }
 };
 
 /**

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
  type MappedClinical,
  type MappedEncounter,
+ type MappedProvider,
 } from "@shared/utils/fhir-mapper.ts";
 import type OpenEMRClient from "@module/openemr/client.ts";
 import {
@@ -11,13 +12,18 @@ import {
  buildEncounterPayload,
  buildMedicationPayload,
  buildVitalsPayload,
+ findEmrAuthorsByPatient,
  searchClinical,
  searchObservations,
 } from "@module/emr/helper.ts";
 import type { FhirEncounter } from "@shared/types/fhir.ts";
 import type { ListResult, Result } from "@shared/types.ts";
+import APIError from "@error/APIError.ts";
 import { toError } from "@shared/error/error.ts";
-import { resolvePatientPid } from "@module/patient/helper.ts";
+import {
+ resolveEncounterEid,
+ resolvePatientPid,
+} from "@module/patient/helper.ts";
 
 export const clinicalKindSchema = z.enum([
  "conditions",
@@ -128,6 +134,12 @@ export type EmrVitalItemParam = z.infer<typeof emrVitalItemParamSchema>;
 
 export type StandardResource = Record<string, unknown>;
 
+/** A SOAP note with our recorded author attached on read. */
+export type SoapNote = StandardResource & {
+ provider?: MappedProvider;
+ authoredAt?: string;
+};
+
 export type ClinicalItem = MappedClinical | MappedEncounter;
 
 export type ClinicalSearchResult = ListResult<ClinicalItem> & {
@@ -146,9 +158,21 @@ export interface ObservationItem {
  effective?: string;
  value?: ObservationValue;
  components?: Array<{ code?: string; value?: ObservationValue }>;
+ encounterId?: string;
+ /** Clinician who recorded this observation (resolved via its encounter). */
+ provider?: MappedProvider;
+ authoredAt?: string;
 }
 
 export type ObservationResult = ListResult<ObservationItem>;
+
+/** Who last attended the patient and when (derived from encounters). */
+export interface LastAttended {
+ encounterId?: string;
+ date?: string;
+ provider?: MappedProvider;
+ authoredAt?: string;
+}
 
 export interface ClinicalSummary {
  patientId: string;
@@ -160,6 +184,27 @@ export interface ClinicalSummary {
  encounters: ClinicalSearchResult;
  vitals: ObservationResult;
  labs: ObservationResult;
+ lastAttended?: LastAttended;
+}
+
+/** The encounter with the latest clinical date (drives "last attended"). */
+function latestEncounter(items: ClinicalItem[]): MappedEncounter | undefined {
+ let latest: MappedEncounter | undefined;
+ for (const item of items) {
+  if (!("start" in item) || !item.start) continue;
+  if (!latest?.start || item.start > latest.start) {
+   latest = item;
+   continue;
+  }
+  // Encounter dates are day-level; break ties by when we recorded them.
+  if (
+   item.start === latest.start &&
+   (item.authoredAt ?? "") > (latest.authoredAt ?? "")
+  ) {
+   latest = item;
+  }
+ }
+ return latest;
 }
 
 class EmrService {
@@ -167,6 +212,7 @@ class EmrService {
   client: OpenEMRClient,
   patientId: string,
  ): Promise<Result<ClinicalSummary>> => {
+  const authors = await findEmrAuthorsByPatient(patientId);
   const [
    conditions,
    allergies,
@@ -177,14 +223,14 @@ class EmrService {
    vitals,
    labs,
   ] = await Promise.all([
-   searchClinical(client, "conditions", patientId),
-   searchClinical(client, "allergies", patientId),
-   searchClinical(client, "medications", patientId),
-   searchClinical(client, "immunizations", patientId),
-   searchClinical(client, "procedures", patientId),
-   searchClinical(client, "encounters", patientId),
-   searchObservations(client, patientId, "vital-signs"),
-   searchObservations(client, patientId, "laboratory"),
+   searchClinical(client, "conditions", patientId, authors),
+   searchClinical(client, "allergies", patientId, authors),
+   searchClinical(client, "medications", patientId, authors),
+   searchClinical(client, "immunizations", patientId, authors),
+   searchClinical(client, "procedures", patientId, authors),
+   searchClinical(client, "encounters", patientId, authors),
+   searchObservations(client, patientId, "vital-signs", authors),
+   searchObservations(client, patientId, "laboratory", authors),
   ]);
 
   const err =
@@ -198,6 +244,8 @@ class EmrService {
    labs[1];
   if (err) return [null, err];
 
+  const last = latestEncounter((encounters[0] as ClinicalSearchResult).items);
+
   return [
    {
     patientId,
@@ -209,6 +257,14 @@ class EmrService {
     encounters: encounters[0] as ClinicalSearchResult,
     vitals: vitals[0] as ObservationResult,
     labs: labs[0] as ObservationResult,
+    lastAttended: last
+     ? {
+        encounterId: last.id,
+        date: last.start,
+        provider: last.provider,
+        authoredAt: last.authoredAt,
+       }
+     : undefined,
    },
    null,
   ];
@@ -230,14 +286,21 @@ class EmrService {
 
  encounter = async (
   client: OpenEMRClient,
-  _patientId: string,
+  patientId: string,
   encounterId: string,
  ): Promise<Result<FhirEncounter>> => {
   try {
-   const encounter = await client.fhirRead<FhirEncounter>(
-    "Encounter",
-    encounterId,
-   );
+   // OpenEMR denies a bare FHIR `Encounter/{id}` read ("Organization policy
+   // does not have permit access resource"); a patient-scoped search is
+   // allowed, so resolve the encounter that way.
+   const bundle = await client.fhirSearch("Encounter", {
+    patient: patientId,
+    _id: encounterId,
+   });
+   const encounter = (bundle.entry ?? [])
+    .map((entry) => entry.resource as FhirEncounter)
+    .find((resource) => resource?.id === encounterId);
+   if (!encounter) return [null, APIError.notFound("Encounter not found")];
    return [encounter, null];
   } catch (e) {
    return [null, toError(e)];
@@ -271,8 +334,10 @@ class EmrService {
    if (pe || !pid) {
     return [null, pe];
    }
+   const [eid, ee] = await resolveEncounterEid(client, patientId, encounterId);
+   if (ee || !eid) return [null, ee];
    const created = await client.standardPost<StandardResource>(
-    `/api/patient/${pid}/encounter/${encounterId}/vital`,
+    `/api/patient/${pid}/encounter/${eid}/vital`,
     buildVitalsPayload(input),
    );
    return [created[0] ?? {}, null];
@@ -293,8 +358,10 @@ class EmrService {
    if (pe || !pid) {
     return [null, pe];
    }
+   const [eid, ee] = await resolveEncounterEid(client, patientId, encounterId);
+   if (ee || !eid) return [null, ee];
    const updated = await client.standardPut<StandardResource>(
-    `/api/patient/${pid}/encounter/${encounterId}/vital/${vitalId}`,
+    `/api/patient/${pid}/encounter/${eid}/vital/${vitalId}`,
     buildVitalsPayload(input),
    );
    return [updated[0] ?? {}, null];
@@ -382,12 +449,21 @@ class EmrService {
  ): Promise<Result<StandardResource>> => {
   const [pid, pe] = await resolvePatientPid(client, patientId);
   if (pe || !pid) return [null, pe];
-  return this.writeStandard(
+  const [created, err] = await this.writeStandard(
    client,
    "POST",
    `/api/patient/${pid}/medication`,
    buildMedicationPayload(input),
   );
+  if (err) return [null, err];
+  const record = created ?? {};
+  // OpenEMR's create returns only the numeric list id; resolve the uuid our
+  // reads (and attribution) key on.
+  if (record.id !== undefined) {
+   const uuid = await this.findMedicationUuid(client, pid, record.id);
+   if (uuid) return [{ ...record, uuid }, null];
+  }
+  return [record, null];
  };
 
  updateMedication = async (
@@ -453,6 +529,83 @@ class EmrService {
   );
  };
 
+ soapNotes = async (
+  client: OpenEMRClient,
+  patientId: string,
+  encounterId: string,
+ ): Promise<Result<SoapNote[]>> => {
+  const [pid, pe] = await resolvePatientPid(client, patientId);
+  if (pe || !pid) return [null, pe];
+  try {
+   const notes = await client.standardGet<StandardResource>(
+    `/api/patient/${pid}/encounter/${encounterId}/soap_note`,
+   );
+   const authors = await findEmrAuthorsByPatient(patientId);
+   return [
+    notes.map((note) => {
+     const author =
+      note.id !== undefined
+       ? authors.get(`soap_note:${String(note.id)}`)
+       : undefined;
+     return author
+      ? { ...note, provider: author.provider, authoredAt: author.authoredAt }
+      : note;
+    }),
+    null,
+   ];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ soapNote = async (
+  client: OpenEMRClient,
+  patientId: string,
+  encounterId: string,
+  noteId: string,
+ ): Promise<Result<SoapNote>> => {
+  const [pid, pe] = await resolvePatientPid(client, patientId);
+  if (pe || !pid) return [null, pe];
+  try {
+   const notes = await client.standardGet<StandardResource>(
+    `/api/patient/${pid}/encounter/${encounterId}/soap_note/${noteId}`,
+   );
+   const note = notes[0];
+   if (!note) return [{}, null];
+   const authors = await findEmrAuthorsByPatient(patientId);
+   const author = authors.get(`soap_note:${noteId}`);
+   return [
+    author
+     ? { ...note, provider: author.provider, authoredAt: author.authoredAt }
+     : note,
+    null,
+   ];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ /** Resolves a medication's uuid from its numeric OpenEMR list id. */
+ private findMedicationUuid = async (
+  client: OpenEMRClient,
+  pid: string,
+  listId: unknown,
+ ): Promise<string | undefined> => {
+  try {
+   // OpenEMR assigns `lists.uuid` lazily: any PatientIssues-service read
+   // backfills missing uuids. Touch medical_problem to force it, otherwise the
+   // medication list endpoint fails on the still-null uuid.
+   await client.standardGet(`/api/patient/${pid}/medical_problem`);
+   const meds = await client.standardGet<StandardResource>(
+    `/api/patient/${pid}/medication`,
+   );
+   const match = meds.find((m) => String(m.id) === String(listId));
+   return typeof match?.uuid === "string" ? match.uuid : undefined;
+  } catch {
+   return undefined;
+  }
+ };
+
  /** Runs a Standard write and normalizes the first unwrapped record. */
  private writeStandard = async (
   client: OpenEMRClient,
@@ -465,8 +618,8 @@ class EmrService {
     method === "POST"
      ? await client.standardPost<StandardResource>(path, body ?? {})
      : method === "PUT"
-      ? await client.standardPut<StandardResource>(path, body ?? {})
-      : await client.standardDelete<StandardResource>(path);
+       ? await client.standardPut<StandardResource>(path, body ?? {})
+       : await client.standardDelete<StandardResource>(path);
    return [result[0] ?? {}, null];
   } catch (e) {
    return [null, toError(e)];

@@ -41,7 +41,10 @@ services:
    retries: 10
 
  openemr:
-  image: openemr/openemr:latest
+  build:
+   context: .
+   dockerfile: Dockerfile
+  image: e-dokita/openemr:8.4.1-lab
   ports:
    - "8400:80"
    - "8401:443"
@@ -61,6 +64,28 @@ services:
   depends_on:
    mysql:
     condition: service_healthy
+
+ # One-shot: reconcile the OpenEMR OAuth client's registered scopes with the
+ # lab API requirements. Opt-in via the "init" profile so a normal `up` is
+ # unaffected; run with `docker compose run --rm openemr-init`.
+ openemr-init:
+  image: mariadb:10.11
+  profiles:
+   - init
+  networks:
+   - openemr-net
+  depends_on:
+   mysql:
+    condition: service_healthy
+  environment:
+   MYSQL_HOST: mysql
+   MYSQL_DATABASE: openemr
+   MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
+   OPENEMR_CLIENT_ID: ${OPENEMR_CLIENT_ID:?OPENEMR_CLIENT_ID must be set}
+  volumes:
+   - ./docker/openemr-init.sh:/usr/local/bin/openemr-init.sh:ro
+  entrypoint: ["/bin/sh", "/usr/local/bin/openemr-init.sh"]
+  restart: "no"
 
 volumes:
  db_data:

@@ -2,6 +2,10 @@
 import asyncHandler from "@middleware/async-handler.ts";
 import type { OpenEMRRequest } from "@shared/http.ts";
 import type { Response } from "express";
+import {
+ recordEmrAuthor,
+ type EmrResourceType,
+} from "@module/emr/helper.ts";
 import EmrService, {
  type AllergyInput,
  type ClinicalKind,
@@ -17,6 +21,20 @@ import EmrService, {
  type RecordVitalsInput,
  type SoapNoteInput,
 } from "@module/emr/emr.service.ts";
+
+/**
+ * Records the acting clinician as the author of a freshly written record.
+ * Best-effort: a missing id or failure never affects the write response.
+ */
+const attribute = (
+ patientId: string,
+ type: EmrResourceType,
+ id: unknown,
+ userId: string,
+): Promise<void> =>
+ id === undefined || id === null || id === ""
+  ? Promise.resolve()
+  : recordEmrAuthor(patientId, type, String(id), userId);
 
 class EmrController {
  summary = asyncHandler(async (req: OpenEMRRequest<EmrPatientParam>, res: Response) => {
@@ -95,6 +113,12 @@ class EmrController {
     req.body,
    );
    if (err) throw err;
+   await attribute(
+    req.params.patientId,
+    "encounter",
+    data?.euuid ?? data?.id,
+    req.user.userId,
+   );
    res.status(201).json({ success: true, data });
   },
  );
@@ -111,6 +135,12 @@ class EmrController {
      req.body,
     );
     if (err) throw err;
+    await attribute(
+     req.params.patientId,
+     "encounter",
+     req.params.encounterId,
+     req.user.userId,
+    );
     res.status(201).json({ success: true, data });
    },
   );
@@ -137,13 +167,19 @@ class EmrController {
     req: OpenEMRRequest<EmrPatientParam, unknown, ConditionInput>,
     res: Response,
    ) => {
-    const [data, err] = await EmrService.createCondition(
-     req.openemr,
-     req.params.patientId,
-     req.body,
-    );
-    if (err) throw err;
-    res.status(201).json({ success: true, data });
+   const [data, err] = await EmrService.createCondition(
+    req.openemr,
+    req.params.patientId,
+    req.body,
+   );
+   if (err) throw err;
+   await attribute(
+    req.params.patientId,
+    "condition",
+    data?.uuid ?? data?.id,
+    req.user.userId,
+   );
+   res.status(201).json({ success: true, data });
    },
   );
 
@@ -183,6 +219,12 @@ class EmrController {
      req.body,
     );
     if (err) throw err;
+    await attribute(
+     req.params.patientId,
+     "allergy",
+     data?.uuid ?? data?.id,
+     req.user.userId,
+    );
     res.status(201).json({ success: true, data });
    },
   );
@@ -226,6 +268,12 @@ class EmrController {
      req.body,
     );
     if (err) throw err;
+    await attribute(
+     req.params.patientId,
+     "medication",
+     data?.uuid,
+     req.user.userId,
+    );
     res.status(201).json({ success: true, data });
    },
   );
@@ -270,6 +318,12 @@ class EmrController {
      req.body,
     );
     if (err) throw err;
+    await attribute(
+     req.params.patientId,
+     "soap_note",
+     data?.sid ?? data?.id,
+     req.user.userId,
+    );
     res.status(201).json({ success: true, data });
    },
   );
@@ -286,10 +340,35 @@ class EmrController {
      req.params.noteId,
      req.body,
     );
-    if (err) throw err;
-    res.json({ success: true, data });
-   },
-  );
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
+
+ soapNotes = asyncHandler(
+  async (req: OpenEMRRequest<EmrEncounterParam>, res: Response) => {
+   const [data, err] = await EmrService.soapNotes(
+    req.openemr,
+    req.params.patientId,
+    req.params.encounterId,
+   );
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
+
+ soapNote = asyncHandler(
+  async (req: OpenEMRRequest<EmrSoapNoteParam>, res: Response) => {
+   const [data, err] = await EmrService.soapNote(
+    req.openemr,
+    req.params.patientId,
+    req.params.encounterId,
+    req.params.noteId,
+   );
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
 }
 
 export default new EmrController();

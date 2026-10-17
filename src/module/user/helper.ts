@@ -6,8 +6,10 @@ import { roles, roleSchema, type UserRole } from "@db/schema/role.ts";
 import { users } from "@db/schema/user.ts";
 import APIError from "@error/APIError.ts";
 import type { Result } from "@shared/types.ts";
+import { toError } from "@shared/error/error.ts";
 import { setDefined } from "@shared/utils/object.ts";
-import { eq } from "drizzle-orm";
+import { decryptSecret, encryptSecret } from "@shared/utils/secret.ts";
+import { eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 export type UserRow = typeof users.$inferSelect;
@@ -30,6 +32,12 @@ export const openEMRProvisionSchema = openEMRLinkSchema.pick({
 });
 export type OpenEMRProvision = z.infer<typeof openEMRProvisionSchema>;
 
+/** Per-user OpenEMR login credentials minted at provisioning time. */
+export interface OpenEMRCredentials {
+ username: string;
+ password: string;
+}
+
 export const userSchema = z.object({
  id: z.string(),
  email: z.string().email(),
@@ -39,14 +47,17 @@ export const userSchema = z.object({
  lastName: z.string(),
  clinicId: z.string().optional(),
  openemr: openEMRLinkSchema,
+ sessionEpoch: z.number().int(),
  createdAt: z.string(),
 });
 export type User = z.infer<typeof userSchema>;
 
-export type PublicUser = Omit<User, "passwordHash">;
+// `sessionEpoch` is an internal revocation counter (embedded in the JWT), never
+// exposed to clients.
+export type PublicUser = Omit<User, "passwordHash" | "sessionEpoch">;
 
 export const createUserSchema = userSchema
- .omit({ id: true, createdAt: true })
+ .omit({ id: true, createdAt: true, sessionEpoch: true })
  .extend({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
@@ -73,12 +84,13 @@ export function toUser(row: UserRecord): User {
    patientId: row.openemrPatientId ?? undefined,
    practitionerId: row.openemrPractitionerId ?? undefined,
   },
+  sessionEpoch: row.sessionEpoch,
   createdAt: row.createdAt.toISOString(),
  };
 }
 
 export function toPublicUser(user: User): PublicUser {
- const { passwordHash: _passwordHash, ...publicUser } = user;
+ const { passwordHash: _passwordHash, sessionEpoch: _sessionEpoch, ...publicUser } = user;
  return publicUser;
 }
 
@@ -137,6 +149,35 @@ export async function findUserByPractitionerId(
   .limit(1);
  if (!row) return [null, APIError.notFound("User not found")];
  return [toUser({ ...row.user, role: row.role as UserRole }), null];
+}
+
+/**
+ * Maps OpenEMR practitioner uuids to clinician display names ("First Last").
+ * Used to attribute EMR records to the doctor OpenEMR reports as author.
+ */
+export async function findUserNamesByPractitionerIds(
+ ids: string[],
+): Promise<Map<string, string>> {
+ const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+ if (unique.length === 0) return new Map();
+ const rows = await db
+  .select({
+   practitionerId: users.openemrPractitionerId,
+   firstName: users.firstName,
+   lastName: users.lastName,
+  })
+  .from(users)
+  .where(inArray(users.openemrPractitionerId, unique));
+ return new Map(
+  rows
+   .filter((r): r is typeof r & { practitionerId: string } =>
+    Boolean(r.practitionerId),
+   )
+   .map((r) => [
+    r.practitionerId,
+    [r.firstName, r.lastName].filter(Boolean).join(" ").trim(),
+   ]),
+ );
 }
 
 /**
@@ -234,6 +275,69 @@ export async function updatePasswordHash(
   .returning({ id: users.id });
  if (!row) return [null, APIError.notFound("User not found")];
  return [undefined, null];
+}
+
+/**
+ * Advances the user's session epoch, instantly invalidating every access JWT
+ * already minted for them (they carry the old epoch). Used on logout and on
+ * credential changes to force re-authentication immediately.
+ */
+export async function bumpSessionEpoch(id: string): Promise<Result<void>> {
+ const [row] = await db
+  .update(users)
+  .set({ sessionEpoch: sql`${users.sessionEpoch} + 1` })
+  .where(eq(users.id, id))
+  .returning({ id: users.id });
+ if (!row) return [null, APIError.notFound("User not found")];
+ return [undefined, null];
+}
+
+/**
+ * Persists the per-user OpenEMR login used for password-grant auto-connect. The
+ * password is encrypted with the shared AES-256-GCM secret key.
+ */
+export async function saveOpenEMRCredentials(
+ id: string,
+ credentials: OpenEMRCredentials,
+ client: DbClient = db,
+ ): Promise<Result<void>> {
+  try {
+   const encrypted = await encryptSecret(credentials.password);
+   const [row] = await client
+    .update(users)
+    .set({
+     openemrUsername: credentials.username,
+     openemrPassword: encrypted,
+    })
+    .where(eq(users.id, id))
+    .returning({ id: users.id });
+  if (!row) return [null, APIError.notFound("User not found")];
+  return [undefined, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+/** Returns the decrypted OpenEMR login for a user, or an error if not stored. */
+export async function getOpenEMRCredentials(
+ id: string,
+): Promise<Result<OpenEMRCredentials>> {
+ const [row] = await db
+  .select({
+   username: users.openemrUsername,
+   password: users.openemrPassword,
+  })
+  .from(users)
+  .where(eq(users.id, id))
+  .limit(1);
+ if (!row) return [null, APIError.notFound("User not found")];
+ if (!row.username || !row.password) {
+  return [null, APIError.badRequest("No OpenEMR credentials stored")];
+ }
+ return [
+  { username: row.username, password: await decryptSecret(row.password) },
+  null,
+ ];
 }
 
 /** Applies a partial update and returns the refreshed user (no-op if empty). */

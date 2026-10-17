@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
-export const ROLE_NAMES = ["patient", "doctor", "admin"] as const;
+export const ROLE_NAMES = ["patient", "doctor", "admin", "lab"] as const;
 export type RoleName = (typeof ROLE_NAMES)[number];
 
 export const roleSchema = z.enum(ROLE_NAMES);

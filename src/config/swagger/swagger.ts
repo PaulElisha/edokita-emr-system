@@ -55,6 +55,12 @@ import {
  threadListQuerySchema,
 } from "@module/messaging/messaging.service.ts";
 import { notificationQuerySchema } from "@module/notification/notification.service.ts";
+import {
+ labOrderBodySchema,
+ labOrderListQuerySchema,
+ labResultBodySchema,
+ labResultListQuerySchema,
+} from "@module/lab/lab.service.ts";
 import { updateUserSchema } from "@module/user/helper.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
 
@@ -137,6 +143,20 @@ const spec = {
       },
      },
      createdAt: { type: "string", format: "date-time" },
+    },
+   },
+   UserProfile: {
+    type: "object",
+    properties: {
+     user: { $ref: "#/components/schemas/User" },
+     openemr: {
+      type: "object",
+      properties: {
+       connected: { type: "boolean" },
+       expiresAt: { type: "string", format: "date-time", nullable: true },
+       scope: { type: "string", nullable: true },
+      },
+     },
     },
    },
    PractitionerQualification: {
@@ -283,7 +303,7 @@ const spec = {
     tags: ["Users"],
     summary: "Current app user and OpenEMR connection status",
     security: [{ bearerAuth: [] }],
-    responses: { "200": jsonResponse("OK", "User") },
+    responses: { "200": jsonResponse("OK", "UserProfile") },
    },
   },
   "/api/users/update": {
@@ -482,7 +502,8 @@ const spec = {
   "/api/emr/{patientId}/summary": {
    get: {
     tags: ["EMR"],
-    summary: "Full clinical summary for a patient",
+    summary:
+     "Full clinical summary for a patient (includes who last attended and when)",
     parameters: paramsFrom(emrPatientParamSchema, "path", true),
     responses: { "200": { description: "OK" } },
    },
@@ -625,6 +646,13 @@ const spec = {
    },
   },
   "/api/emr/{patientId}/encounters/{encounterId}/soap-notes": {
+   get: {
+    tags: ["EMR"],
+    summary:
+     "List SOAP notes on an encounter (with the recording clinician, when known)",
+    parameters: paramsFrom(emrEncounterParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
    post: {
     tags: ["EMR"],
     summary: "Record a SOAP note on an encounter",
@@ -634,6 +662,12 @@ const spec = {
    },
   },
   "/api/emr/{patientId}/encounters/{encounterId}/soap-notes/{noteId}": {
+   get: {
+    tags: ["EMR"],
+    summary: "Get a SOAP note by id (with the recording clinician, when known)",
+    parameters: paramsFrom(emrSoapNoteParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
+   },
    put: {
     tags: ["EMR"],
     summary: "Update a SOAP note",
@@ -786,6 +820,41 @@ const spec = {
     parameters: paramsFrom(idParamSchema, "path", true),
     security: [{ bearerAuth: [] }],
     responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/lab/orders": {
+   get: {
+    tags: ["Lab"],
+    summary:
+     "List lab orders (patients see their own; staff filter by patientId/status)",
+    parameters: paramsFrom(labOrderListQuerySchema, "query"),
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
+   },
+   post: {
+    tags: ["Lab"],
+    summary: "Create a lab order (doctor/admin only)",
+    security: [{ bearerAuth: [] }],
+    requestBody: requestBody(labOrderBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/lab/results": {
+   get: {
+    tags: ["Lab"],
+    summary:
+     "List lab results (by orderId or patientId; patients see only their own)",
+    parameters: paramsFrom(labResultListQuerySchema, "query"),
+    security: [{ bearerAuth: [] }],
+    responses: { "200": { description: "OK" } },
+   },
+   post: {
+    tags: ["Lab"],
+    summary:
+     "Record lab results against an order (lab/admin only; notifies the ordering doctor)",
+    security: [{ bearerAuth: [] }],
+    requestBody: requestBody(labResultBodySchema),
+    responses: { "201": { description: "Created" } },
    },
   },
  },

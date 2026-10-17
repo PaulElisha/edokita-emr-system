@@ -63,10 +63,17 @@ export interface MappedPractitioner extends NameParts {
  stateLicenseNumber?: string;
 }
 
+/** The clinician OpenEMR attributes a record to (id is a Practitioner uuid). */
+export interface MappedProvider {
+  id?: string;
+  name?: string;
+}
+
 export interface MappedClinical {
   id?: string;
   resourceType: string;
   kind: string;
+  provider?: MappedProvider;
   code?: string;
   category: string[];
   clinicalStatus?: string;
@@ -78,6 +85,8 @@ export interface MappedClinical {
   value?: { value?: number | string; unit?: string };
   subjectId?: string;
   encounterId?: string;
+  /** When our API recorded this record (OpenEMR itself stores no author/time). */
+  authoredAt?: string;
 }
 
 export interface MappedParticipant {
@@ -115,6 +124,9 @@ export interface MappedEncounter {
   start?: string;
   end?: string;
   subjectId?: string;
+  provider?: MappedProvider;
+  /** When our API recorded this record (OpenEMR itself stores no author/time). */
+  authoredAt?: string;
 }
 
 export function conceptText(concept?: FhirCodeableConcept): string | undefined {
@@ -246,10 +258,15 @@ export function mapClinical(
   resource: FhirClinicalResource,
   kind: string,
 ): MappedClinical {
+  // OpenEMR only attributes a clinician to MedicationRequest (`requester`);
+  // conditions/allergies/observations carry no author.
+  const providerId =
+    "requester" in resource ? referenceId(resource.requester) : undefined;
   return {
     id: resource.id,
     resourceType: resource.resourceType,
     kind,
+    provider: providerId ? { id: providerId } : undefined,
     code: clinicalCode(resource),
     category: clinicalCategory(resource),
     clinicalStatus:
@@ -323,6 +340,17 @@ export function mapAppointment(a: FhirAppointment): MappedAppointment {
 }
 
 export function mapEncounter(e: FhirEncounter): MappedEncounter {
+  // The performing clinician is the `PPRF` participant; OpenEMR returns providers
+  // without an NPI as a `Person` actor rather than `Practitioner`.
+  const performer = (e.participant ?? []).find((p) => {
+    const role = p.type?.[0]?.coding?.[0]?.code;
+    const actorType =
+      p.individual?.type ?? p.individual?.reference?.split("/")[0];
+    return (
+      role === "PPRF" || actorType === "Practitioner" || actorType === "Person"
+    );
+  });
+  const providerId = referenceId(performer?.individual);
   return {
     id: e.id,
     resourceType: e.resourceType,
@@ -335,6 +363,7 @@ export function mapEncounter(e: FhirEncounter): MappedEncounter {
     start: e.period?.start,
     end: e.period?.end,
     subjectId: referenceId(e.subject),
+    provider: providerId ? { id: providerId } : undefined,
   };
 }
 

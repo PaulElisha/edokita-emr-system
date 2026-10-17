@@ -7,6 +7,7 @@ import appointmentRouter from "@module/appointment/appointment.route.ts";
 import authRouter from "@module/auth/auth.route.ts";
 import doctorRouter from "@module/doctor/doctor.route.ts";
 import emrRouter from "@module/emr/emr.route.ts";
+import labRouter from "@module/lab/lab.route.ts";
 import messagingRouter from "@module/messaging/messaging.route.ts";
 import notificationRouter from "@module/notification/notification.route.ts";
 import openemrRouter from "@module/openemr/openemr.route.ts";
@@ -67,6 +68,7 @@ class App {
   this.app.use("/api/patients", patientRouter);
   this.app.use("/api/appointments", appointmentRouter);
   this.app.use("/api/emr", emrRouter);
+  this.app.use("/api/lab", labRouter);
   this.app.use("/api/prescriptions", prescriptionRouter);
   this.app.use("/api/schedules", scheduleRouter);
   this.app.use("/api/waitlist", waitlistRouter);

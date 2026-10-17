@@ -13,7 +13,9 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "auth": "tsx src/shared/utils/auth.ts"
+    "auth": "tsx src/shared/utils/auth.ts",
+    "openemr:scopes": "docker compose run --rm openemr-init",
+    "provision": "npm run db:migrate && npm run openemr:scopes"
   },
   "keywords": [
     "hospital",

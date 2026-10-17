@@ -15,6 +15,7 @@ import {
  notifications,
  threadReads,
 } from "./schema/messaging.ts";
+import { emrRecordAuthors } from "./schema/emr.ts";
 
 export default {
  users,
@@ -30,4 +31,5 @@ export default {
  conversationMessages,
  threadReads,
  notifications,
+ emrRecordAuthors,
 };

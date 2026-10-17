@@ -36,6 +36,34 @@
       "when": 1792145298170,
       "tag": "0004_numerous_hobgoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792186743807,
+      "tag": "0005_workable_nocturne",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792190713844,
+      "tag": "0006_new_ender_wiggin",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792238150152,
+      "tag": "0007_superb_mephistopheles",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792284000000,
+      "tag": "0008_lab_role",
+      "breakpoints": true
     }
   ]
 }

@@ -6,3 +6,5 @@ public-key.pem
 jwks.json
 
 *.log
+
+openemr/.work/

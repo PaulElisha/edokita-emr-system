@@ -23,13 +23,21 @@ class UserService {
   const [user, err] = await findUserById(userId);
   if (err || !user) return [null, err];
   const [tokens] = await getTokens(userId);
+  // A retained OpenEMR refresh token (post-logout) is not a live session, so
+  // "connected" reflects a usable access token only. Patients never hold a
+  // per-user token (they read EMR via the shared service account), so their
+  // connection is their linked OpenEMR patient record.
+  const connected =
+   user.role === "patient"
+    ? Boolean(user.openemr.patientId)
+    : Boolean(tokens?.accessToken && tokens.expiresAt.getTime() > Date.now());
   return [
    {
     user: toPublicUser(user),
     openemr: {
-     connected: Boolean(tokens),
-     expiresAt: tokens?.expiresAt ?? null,
-     scope: tokens?.scope ?? null,
+     connected,
+     expiresAt: connected && tokens ? tokens.expiresAt : null,
+     scope: connected && tokens ? tokens.scope : null,
     },
    },
    null,

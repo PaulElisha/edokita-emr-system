@@ -21,6 +21,69 @@ function extractCsrf(html: string): string | null {
  return m2 ? m2[1] : null;
 }
 
+/** Opens an OpenEMR admin web session and returns the session cookie. */
+async function loginAsAdmin(): Promise<Result<string>> {
+ const res = await fetch(
+  `${BASE}/interface/main/main_screen.php?auth=login&site=default`,
+  {
+   method: "POST",
+   redirect: "manual",
+   headers: {
+    "Content-Type": "application/x-www-form-urlencoded",
+    Referer: `${BASE}/interface/login/login.php`,
+   },
+   body: new URLSearchParams({
+    new_login_session_management: "1",
+    languageChoice: "1",
+    authUser: OpenEMR.username,
+    clearPass: OpenEMR.password,
+    go: "Go",
+   }).toString(),
+  },
+ );
+ const cookie = extractCookie(res.headers.get("set-cookie"));
+ if (res.status === 302 && cookie) {
+  const loc = res.headers.get("location");
+  if (loc) {
+   await fetch(loc.startsWith("http") ? loc : `${BASE}${loc}`, {
+    method: "GET",
+    headers: { Cookie: cookie },
+    redirect: "follow",
+   });
+  }
+ }
+ if (!cookie) {
+  return [
+   null,
+   APIError.internalServer("Failed to open OpenEMR admin session"),
+  ];
+ }
+ return [cookie, null];
+}
+
+/** Fetches a CSRF token for OpenEMR's usergroup forms. */
+async function fetchCsrf(cookie: string): Promise<Result<string>> {
+ const res = await fetch(
+  `${BASE}/interface/usergroup/usergroup_admin_add.php`,
+  {
+   method: "GET",
+   headers: { Cookie: cookie },
+   redirect: "follow",
+  },
+ );
+ const html = await res.text();
+ const csrf = extractCsrf(html);
+ if (!csrf) {
+  return [null, APIError.internalServer("Failed to get OpenEMR CSRF token")];
+ }
+ return [csrf, null];
+}
+
+/**
+ * Creates an OpenEMR user with a real login (users_secure) and ACL group via the
+ * Users admin. Unlike the FHIR Practitioner create, this guarantees the doctor
+ * can authenticate (required for password-grant auto-connect).
+ */
 export async function createOpenEMRLogin(params: {
  username: string;
  password: string;
@@ -29,59 +92,14 @@ export async function createOpenEMRLogin(params: {
  email: string;
  npi?: string;
  specialty?: string;
- group?: "Physicians" | "Administrators";
+ group?: "Physicians" | "Administrators" | "Clinicians";
 }): Promise<Result<void>> {
  try {
-  let cookie: string | null = null;
+  const [cookie, cErr] = await loginAsAdmin();
+  if (cErr || !cookie) return [null, cErr];
+  const [csrf, sErr] = await fetchCsrf(cookie);
+  if (sErr || !csrf) return [null, sErr];
 
-  // 1) Login as admin
-  const loginRes = await fetch(
-   `${BASE}/interface/main/main_screen.php?auth=login&site=default`,
-   {
-    method: "POST",
-    redirect: "manual",
-    headers: {
-     "Content-Type": "application/x-www-form-urlencoded",
-     Referer: `${BASE}/interface/login/login.php`,
-    },
-    body: new URLSearchParams({
-     new_login_session_management: "1",
-     languageChoice: "1",
-     authUser: OpenEMR.username,
-     clearPass: OpenEMR.password,
-     go: "Go",
-    }).toString(),
-   },
-  );
-  cookie = extractCookie(loginRes.headers.get("set-cookie"));
-  // follow redirect if any
-  if (loginRes.status === 302 && cookie) {
-   const loc = loginRes.headers.get("location");
-   if (loc) {
-    await fetch(loc.startsWith("http") ? loc : `${BASE}${loc}`, {
-     method: "GET",
-     headers: { Cookie: cookie },
-     redirect: "follow",
-    });
-   }
-  }
-
-  // 2) Get add user form for CSRF
-  const addRes = await fetch(
-   `${BASE}/interface/usergroup/usergroup_admin_add.php`,
-   {
-    method: "GET",
-    headers: cookie ? { Cookie: cookie } : {},
-    redirect: "follow",
-   },
-  );
-  const addHtml = await addRes.text();
-  const csrf = extractCsrf(addHtml);
-  if (!csrf) {
-   return [null, APIError.internalServer("Failed to get OpenEMR CSRF token")];
-  }
-
-  // 3) Submit new user
   const body = new URLSearchParams({
    csrf_token_form: csrf,
    mode: "new_user",
@@ -107,7 +125,7 @@ export async function createOpenEMRLogin(params: {
    {
     method: "POST",
     headers: {
-     ...(cookie ? { Cookie: cookie } : {}),
+     Cookie: cookie,
      "Content-Type": "application/x-www-form-urlencoded",
      Referer: `${BASE}/interface/usergroup/usergroup_admin_add.php`,
     },
@@ -117,6 +135,53 @@ export async function createOpenEMRLogin(params: {
   );
   if (!createRes.ok) {
    return [null, APIError.internalServer("Failed to create OpenEMR user")];
+  }
+  return [undefined, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+/**
+ * Sets an existing OpenEMR user's password and ACL group. OpenEMR's `mode=update`
+ * handler always rewrites authorized/active/see_auth and the ARO mapping from the
+ * POST body, so current values must be re-supplied to avoid clobbering them.
+ */
+export async function setOpenEMRUserAccount(params: {
+ id: number;
+ newPassword: string;
+ group?: string;
+}): Promise<Result<void>> {
+ try {
+  const [cookie, cErr] = await loginAsAdmin();
+  if (cErr || !cookie) return [null, cErr];
+  const [csrf, sErr] = await fetchCsrf(cookie);
+  if (sErr || !csrf) return [null, sErr];
+
+  const body = new URLSearchParams({
+   csrf_token_form: csrf,
+   mode: "update",
+   privatemode: "user_admin",
+   id: String(params.id),
+   adminPass: OpenEMR.password,
+   clearPass: params.newPassword,
+   "access_group[]": params.group ?? "Physicians",
+   authorized: "1",
+   active: "1",
+   see_auth: "1",
+  });
+  const res = await fetch(`${BASE}/interface/usergroup/usergroup_admin.php`, {
+   method: "POST",
+   headers: {
+    Cookie: cookie,
+    "Content-Type": "application/x-www-form-urlencoded",
+    Referer: `${BASE}/interface/usergroup/user_admin.php?id=${params.id}`,
+   },
+   body: body.toString(),
+   redirect: "follow",
+  });
+  if (!res.ok) {
+   return [null, APIError.internalServer("Failed to set OpenEMR user account")];
   }
   return [undefined, null];
  } catch (e) {

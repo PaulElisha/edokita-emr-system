@@ -23,7 +23,7 @@ class DoctorRouter {
    "/",
    authenticate,
    withOpenEMR,
-   requireRole("admin"),
+   requireRole("admin", "patient"),
    validate(doctorListQuerySchema, "query"),
    DoctorController.index,
   );
@@ -39,7 +39,7 @@ class DoctorRouter {
    "/:id",
    authenticate,
    withOpenEMR,
-   requireRole("admin"),
+   requireRole("admin", "patient"),
    validate(idParamSchema, "params"),
    DoctorController.show,
   );

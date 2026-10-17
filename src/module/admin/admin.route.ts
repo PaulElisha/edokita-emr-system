@@ -13,11 +13,15 @@ class AdminRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate, withOpenEMR, requireRole("admin"));
+  this.router.use(authenticate, withOpenEMR);
 
-  this.router.get("/stats", AdminController.stats);
-  this.router.get("/users", AdminController.users);
-  this.router.get("/facilities", AdminController.facilities);
+  this.router.get("/stats", requireRole("admin"), AdminController.stats);
+  this.router.get("/users", requireRole("admin"), AdminController.users);
+  this.router.get(
+   "/facilities",
+   requireRole("admin"),
+   AdminController.facilities,
+  );
  }
 }
 

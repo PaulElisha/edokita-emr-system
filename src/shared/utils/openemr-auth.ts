@@ -14,7 +14,7 @@ import {
 } from "oauth4webapi";
 
 export const OPENEMR_SCOPE =
- "openid api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Practitioner.write user/Appointment.read user/ValueSet.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus";
+ "openid api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Practitioner.write user/Appointment.read user/ValueSet.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus";
 
 /** Refresh this long before the token actually expires. */
 const SKEW_MS = 60_000;

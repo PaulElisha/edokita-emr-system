@@ -1,0 +1,11 @@
+# @format
+.git
+.vscode
+node_modules
+dist
+docs
+drizzle
+*.log
+.env
+private-key.pem
+public-key.pem

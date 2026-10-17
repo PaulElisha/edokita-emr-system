@@ -65,6 +65,11 @@ const EnvSchema = z.object({
  // keys are read from private-key.pem / public-key.pem at the project root.
  APP_JWT_PRIVATE_KEY: z.string().optional(),
  APP_JWT_PUBLIC_KEY: z.string().optional(),
+
+ // Symmetric key (hashed to 32 bytes) for encrypting stored OpenEMR OAuth tokens
+ // and per-user OpenEMR credentials at rest. Falls back to the app JWT private
+ // key when unset.
+ TOKEN_ENCRYPTION_KEY: z.string().optional(),
 });
 export type EnvType = z.infer<typeof EnvSchema>;
 let Env: EnvType;

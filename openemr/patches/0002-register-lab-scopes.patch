@@ -1,0 +1,20 @@
+--- a/src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php
++++ b/src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php
+@@ -277,6 +277,8 @@
+                 ,'insurance' => ['c','r','u','s']
+                 ,'insurance_company' => ['c','r','u','s']
+                 ,'insurance_type' => ['s']
++                ,'lab_order' => ['c','r','u','s']
++                ,'lab_result' => ['c','r','u','s']
+                 ,'list' => ['r']
+                 ,'medical_problem' => ['c','r','u','d','s']
+                 ,'medication' => ['c','r','u','d','s']
+@@ -408,6 +410,8 @@
+             'insurance' => xl("insurance information including coverage, policy, and subscriber information"),
+             'insurance_company' => xl("insurance company information including name, contact information, and address"),
+             'insurance_type' => xl("insurance type information including name, contact information, and address"),
++            'lab_order' => xl("laboratory orders"),
++            'lab_result' => xl("laboratory results"),
+             'list' => xl("lists including problem lists, medication lists, and allergy lists"),
+             'medical_problem' => xl("medical problems including health concerns, problems, and encounter diagnoses"),
+             'medication' => xl("drug information related to planned and prescribed medication history"),

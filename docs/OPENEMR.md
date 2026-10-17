@@ -109,7 +109,9 @@ OpenEMR needs a registered OAuth client so our backend can request tokens. In th
   drops it. In particular, the standard‑API v2 scopes `user/list.r user/appointment.cruds
   user/encounter.crus user/vital.crus user/user.rs user/facility.crus` must be registered, **along with
   the clinical‑write scopes** `user/medical_problem.cruds user/allergy.cruds user/medication.cruds
-  user/prescription.crds user/soap_note.crus` (used by the EMR write + e‑prescription endpoints).
+  user/prescription.crds user/soap_note.crus` (used by the EMR write + e‑prescription endpoints),
+  **and the lab scopes** `user/lab_order.crus user/lab_result.crus` (see §8 and §"Reconciling the
+  client scopes automatically" below).
 - **Deployed version is OpenEMR 8.4.1.** If you add a new scope to `OPENEMR_SCOPE`/`ROLE_SCOPES` you
   must also add it here (and re‑mint per‑user tokens): the OAuth client only re‑mints on a `401`, but a
   missing scope ceiling surfaces as a `403`, so existing sessions keep failing until the user
@@ -120,6 +122,43 @@ OpenEMR needs a registered OAuth client so our backend can request tokens. In th
 > In the current dev setup the client is already registered:
 > `OPENEMR_CLIENT_ID=NnvxL8Buakb3PUyWSOskcSrZYABp47m-Mgq6QHG7FUI`
 > (secret lives only in `.env` — never commit it).
+
+### Reconciling the client scopes automatically
+
+Registering the client is manual (above), but the scope ceiling can drift as we add features.
+`docker/openemr-init.sh` idempotently appends the lab scopes to `oauth_clients.scope` for the client
+in `OPENEMR_CLIENT_ID`; it waits (bounded) for the client row to exist and is safe to re-run.
+
+```bash
+npm run openemr:scopes     # docker compose run --rm openemr-init
+npm run provision          # db:migrate (app roles incl. "lab") + openemr:scopes
+```
+
+The service is opt-in (`profiles: [init]`) so a plain `docker compose up` is unaffected. Because the
+client is created by hand, run `provision` **after** registering the client in the admin UI.
+
+### The OpenEMR overlay (how our code is layered)
+
+`Dockerfile` builds `e-dokita/openemr:8.4.1-lab` from a **digest‑pinned** stock image. The extension
+is layered in two ways so an OpenEMR upgrade is a re‑apply, not a hand merge:
+
+- **New files** (no upstream counterpart) are copied in from `openemr/`:
+  `src/Services/LabService.php`, `src/RestControllers/LabRestController.php`.
+- **Patches** against upstream **core** files are applied at build time from `openemr/patches/`:
+  - `0001-add-lab-standard-routes.patch` → `apis/routes/_rest_routes_standard.inc.php` (lab routes).
+  - `0002-register-lab-scopes.patch` → `src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php`
+    (registers `lab_order` / `lab_result` scopes).
+
+To bump OpenEMR: change the digest in `Dockerfile`, then
+
+```bash
+openemr/regenerate-patches.sh        # extract pristine core files + re-apply + rewrite patches
+# if a hunk fails: fix files under openemr/.work/patched/ then
+openemr/regenerate-patches.sh --regen-only
+docker compose build openemr
+```
+
+`openemr/.work/` is scratch space (git‑ignored); `openemr/patches/` is the tracked source of truth.
 
 ---
 
@@ -439,7 +478,17 @@ Scope grammar: FHIR uses `user/<Resource>.<read|write>`; the **standard API uses
 
 > **The OAuth client’s registered `scope` is the ceiling.** OpenEMR silently drops any requested scope
 > the client isn’t registered for — `user/list.r` was dropped until the client’s `oauth_clients.scope`
-> was updated. To add a scope, re‑register/update the client, not just `ROLE_SCOPES`.
+> was updated. To add a scope, re‑register/update the client, not just `ROLE_SCOPES`. The lab scopes
+> are reconciled automatically via `npm run openemr:scopes` (see §2).
+
+### The `lab` role and lab scopes
+
+The lab workflow adds a `lab` app role (Drizzle migration `0008_lab_role.sql`) and two standard‑API
+scopes — `user/lab_order.crus` and `user/lab_result.crus` (registered in `ServerScopeListEntity.php`
+via `openemr/patches/0002-register-lab-scopes.patch`). They are requested by the `doctor`, `admin`,
+and `lab` roles and by the service account. The lab routes end in the scope resource name
+(`/api/lab_order`, `/api/lab_result`) because OpenEMR derives the required scope from the last path
+segment.
 
 ### Patients are the exception
 
@@ -464,6 +513,7 @@ user/Practitioner.read user/Practitioner.write
 user/Appointment.read
 user/user.rs user/facility.crus
 user/appointment.cruds user/encounter.crus user/vital.crus
+user/lab_order.crus user/lab_result.crus
 user/list.r
 ```
 

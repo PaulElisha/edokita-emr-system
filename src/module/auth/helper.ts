@@ -7,7 +7,8 @@ import APIError from "@error/APIError.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { decodeJwtPayload, signAppToken, type JwtPayload } from "@auth/jwt.ts";
-import type { PublicUser } from "@module/user/helper.ts";
+import type { PublicUser, User } from "@module/user/helper.ts";
+import { toPublicUser } from "@module/user/helper.ts";
 import {
  authorizationServer,
  getClientAuth,
@@ -15,9 +16,11 @@ import {
  oauthOptions,
 } from "@auth/oauth.ts";
 import { and, eq, isNull, lt } from "drizzle-orm";
-import { createHash, randomBytes } from "node:crypto";
+import { isBefore, subDays } from "date-fns";
+import { createHash } from "node:crypto";
 import {
  ResponseBodyError,
+ generateRandomState,
  genericTokenEndpointRequest,
  processGenericTokenEndpointResponse,
 } from "oauth4webapi";
@@ -244,6 +247,27 @@ export async function clearTokens(userId: string): Promise<Result<void>> {
  }
 }
 
+/**
+ * Invalidates the OpenEMR *access* token while retaining the refresh token.
+ *
+ * Used on logout for the "middle ground": the live session is severed
+ * immediately (no usable access token), but the stored refresh token lets the
+ * next login re-establish the OpenEMR session without re-running the password
+ * grant — decoupling day-to-day auto-connect from OpenEMR's password policy
+ * until the refresh token itself expires (~90 days).
+ */
+export async function clearAccessToken(userId: string): Promise<Result<void>> {
+ try {
+  await db
+   .update(openemrTokens)
+   .set({ accessToken: "", expiresAt: new Date() })
+   .where(eq(openemrTokens.userId, userId));
+  return [undefined, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
 export async function savePending(
  state: string,
  pending: PendingAuth,
@@ -301,6 +325,14 @@ export async function takePending(state: string): Promise<Result<PendingAuth>> {
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const RESET_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * Inactivity window (days). Refresh tokens rotate on every use, so the presented
+ * token's `createdAt` is the last time the user did anything on the app. Once
+ * that is older than this window, the session is considered abandoned and its
+ * refresh tokens are revoked, forcing a fresh login.
+ */
+const IDLE_WINDOW_DAYS = 3;
+
 export interface AuthResult {
  user: PublicUser;
  token: string;
@@ -319,7 +351,7 @@ export interface IssuedRefreshToken {
 
 /** Opaque high-entropy token (raw value returned to the client once). */
 function generateToken(): string {
- return randomBytes(32).toString("base64url");
+ return generateRandomState();
 }
 
 /** Tokens are persisted hashed so a DB leak cannot be replayed. */
@@ -328,17 +360,16 @@ function hashToken(raw: string): string {
 }
 
 /** Mints an app access token + refresh token for a newly authenticated user. */
-export async function issueSession(
- user: PublicUser,
-): Promise<Result<AuthResult>> {
+export async function issueSession(user: User): Promise<Result<AuthResult>> {
  const token = await signAppToken({
   userId: user.id,
   role: user.role,
   email: user.email,
+  sessionEpoch: user.sessionEpoch,
  });
  const [issued, err] = await issueRefreshToken(user.id);
  if (err || !issued) return [null, err];
- return [{ user, token, refreshToken: issued.token }, null];
+ return [{ user: toPublicUser(user), token, refreshToken: issued.token }, null];
 }
 
 export async function issueRefreshToken(
@@ -347,24 +378,28 @@ export async function issueRefreshToken(
  try {
   const token = generateToken();
   const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
-  await db
-   .insert(refreshTokens)
-   .values({
-    userId,
-    tokenHash: hashToken(token),
-    revoked: false,
-    expiresAt,
-   });
+  await db.insert(refreshTokens).values({
+   userId,
+   tokenHash: hashToken(token),
+   revoked: false,
+   expiresAt,
+  });
   return [{ token, expiresAt }, null];
  } catch (e) {
   return [null, toError(e)];
  }
 }
 
-/** Validates a refresh token and returns its owning user id (not revoked/expired). */
+export interface VerifiedRefreshToken {
+ userId: string;
+ /** When this token was issued; equals the last refresh = last app activity. */
+ createdAt: Date;
+}
+
+/** Validates a refresh token and returns its owner + issue time (not revoked/expired). */
 export async function verifyRefreshToken(
  raw: string,
-): Promise<Result<string>> {
+): Promise<Result<VerifiedRefreshToken>> {
  try {
   const [row] = await db
    .select()
@@ -380,10 +415,15 @@ export async function verifyRefreshToken(
   if (row.expiresAt.getTime() < Date.now()) {
    return [null, APIError.unauthorized("Refresh token expired")];
   }
-  return [row.userId, null];
+  return [{ userId: row.userId, createdAt: row.createdAt }, null];
  } catch (e) {
   return [null, toError(e)];
  }
+}
+
+/** True when the given last-activity time is older than the idle window. */
+export function isIdle(lastActivity: Date): boolean {
+ return isBefore(lastActivity, subDays(new Date(), IDLE_WINDOW_DAYS));
 }
 
 export async function revokeRefreshToken(raw: string): Promise<Result<void>> {
@@ -445,7 +485,8 @@ export async function consumePasswordResetToken(
     ),
    )
    .limit(1);
-  if (!row) return [null, APIError.badRequest("Invalid or expired reset token")];
+  if (!row)
+   return [null, APIError.badRequest("Invalid or expired reset token")];
   if (row.expiresAt.getTime() < Date.now()) {
    return [null, APIError.badRequest("Invalid or expired reset token")];
   }

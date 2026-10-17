@@ -28,51 +28,55 @@ class EmrRouter {
  }
 
  initializeRoutes() {
-  this.router.use(
-   authenticate,
-   withOpenEMR,
-   requireRole("admin", "doctor", "patient"),
-  );
+  this.router.use(authenticate, withOpenEMR);
 
   this.router.get(
    "/:patientId/summary",
+   requireRole("admin", "doctor", "patient"),
    validate(emrPatientParamSchema, "params"),
    EmrController.summary,
   );
   this.router.get(
    "/:patientId/clinical/:kind",
+   requireRole("admin", "doctor", "patient"),
    validate(emrClinicalParamSchema, "params"),
    EmrController.clinical,
   );
   this.router.get(
    "/:patientId/vitals",
+   requireRole("admin", "doctor", "patient"),
    validate(emrPatientParamSchema, "params"),
    EmrController.vitals,
   );
   this.router.get(
    "/:patientId/labs",
+   requireRole("admin", "doctor", "patient"),
    validate(emrPatientParamSchema, "params"),
    EmrController.labs,
   );
   this.router.get(
    "/:patientId/encounters",
+   requireRole("admin", "doctor", "patient"),
    validate(emrPatientParamSchema, "params"),
    EmrController.encounters,
   );
   this.router.get(
    "/:patientId/encounters/:encounterId",
+   requireRole("admin", "doctor", "patient"),
    validate(emrEncounterParamSchema, "params"),
    EmrController.encounter,
   );
 
   this.router.post(
    "/:patientId/encounters",
+   requireRole("admin", "doctor"),
    validate(emrPatientParamSchema, "params"),
    validate(encounterBodySchema),
    EmrController.createEncounter,
   );
   this.router.post(
    "/:patientId/encounters/:encounterId/vitals",
+   requireRole("admin", "doctor"),
    validate(emrEncounterParamSchema, "params"),
    validate(vitalsBodySchema),
    EmrController.recordVitals,
@@ -148,6 +152,18 @@ class EmrRouter {
    EmrController.deleteMedication,
   );
 
+  this.router.get(
+   "/:patientId/encounters/:encounterId/soap-notes",
+   requireRole("admin", "doctor", "patient"),
+   validate(emrEncounterParamSchema, "params"),
+   EmrController.soapNotes,
+  );
+  this.router.get(
+   "/:patientId/encounters/:encounterId/soap-notes/:noteId",
+   requireRole("admin", "doctor", "patient"),
+   validate(emrSoapNoteParamSchema, "params"),
+   EmrController.soapNote,
+  );
   this.router.post(
    "/:patientId/encounters/:encounterId/soap-notes",
    requireRole("admin", "doctor"),

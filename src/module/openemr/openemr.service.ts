@@ -22,6 +22,7 @@ import {
  linkOpenEMR,
  toPublicUser,
  type OpenEMRLinkUpdate,
+ type OpenEMRCredentials,
  type PublicUser,
 } from "@module/user/helper.ts";
 import { toError } from "@shared/error/error.ts";
@@ -34,9 +35,11 @@ export const ROLE_SCOPES: Record<string, string> = {
  patient:
   "openid offline_access api:fhir api:oemr patient/Patient.read patient/Observation.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Immunization.read patient/Procedure.read patient/Encounter.read patient/Appointment.read",
  doctor:
-  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Appointment.read user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus",
+  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Appointment.read user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus",
  admin:
-  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Practitioner.read user/Practitioner.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Appointment.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus",
+  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Practitioner.read user/Practitioner.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Appointment.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus",
+ lab:
+  "openid offline_access api:fhir api:oemr user/Patient.read user/Observation.read user/Procedure.read user/lab_order.crus user/lab_result.crus",
 };
 
 export const callbackQuerySchema = z.object({
@@ -128,6 +131,34 @@ class OpenEMRService {
 
    await this.persistConnection(user, data);
    return [toPublicUser(user), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ /**
+  * Connects a user by exchanging their stored OpenEMR login through the
+  * password grant, then persists the resulting token set. Used for per-user
+  * auto-connect at login (no browser redirect required).
+  */
+ connectWithCredentials = async (
+  userId: string,
+  credentials: OpenEMRCredentials,
+ ): Promise<Result<void>> => {
+  try {
+   const [user, uErr] = await findUserById(userId);
+   if (uErr || !user) return [null, uErr];
+   const body = new URLSearchParams({
+    grant_type: "password",
+    username: credentials.username,
+    password: credentials.password,
+    user_role: "users",
+    scope: ROLE_SCOPES[user.role] ?? ROLE_SCOPES.doctor,
+   });
+   const [data, err] = await tokenRequest(body);
+   if (err || !data) return [null, err];
+   await this.persistConnection(user, data);
+   return [undefined, null];
   } catch (e) {
    return [null, toError(e)];
   }

@@ -17,10 +17,19 @@ const KID = "edokita-api-key-1";
 const ISSUER = "e-dokita";
 const AUDIENCE = "e-dokita-api";
 
+/**
+ * App access-token lifetime. Kept short so that, because the JWT is stateless
+ * and cannot be revoked early, a logged-out session's token stops working
+ * quickly. Clients renew via the (revocable) opaque refresh token.
+ */
+const ACCESS_TOKEN_TTL = "15m";
+
 export interface JwtPayload extends JWTPayload {
  userId: string;
  role: UserRole;
  email: string;
+ /** Session epoch at issue time; a mismatch with the DB means revocation. */
+ sessionEpoch?: number;
 }
 
 function pem(value: string | undefined, file: string): string {
@@ -52,13 +61,14 @@ export async function signAppToken(payload: JwtPayload): Promise<string> {
   userId: payload.userId,
   role: payload.role,
   email: payload.email,
+  sessionEpoch: payload.sessionEpoch ?? 0,
  })
   .setProtectedHeader({ alg: ALG, kid: KID })
   .setSubject(payload.userId)
   .setIssuer(ISSUER)
   .setAudience(AUDIENCE)
   .setIssuedAt()
-  .setExpirationTime("12h")
+  .setExpirationTime(ACCESS_TOKEN_TTL)
   .sign(await privateKey());
 }
 

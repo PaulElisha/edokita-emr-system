@@ -1,4 +1,3 @@
-/** @format */
 import { OpenEMR } from "@/env.ts";
 import { getAccessToken } from "@shared/utils/openemr-auth.ts";
 import type { FhirBundle, FhirResource } from "@shared/types/fhir.ts";
@@ -9,14 +8,12 @@ import ErrorCode from "@enum/error-code.ts";
 
 export type QueryValue = string | number | boolean | undefined | null;
 
-/** OpenEMR FHIR create endpoints reply with a lightweight envelope, not a resource. */
 export interface OpenEMRCreateResult {
  id?: number | string;
  uuid?: string;
  pid?: number;
 }
 
-/** Extracts the stable FHIR id from an OpenEMR create response (uuid preferred). */
 export function createdResourceId(result: unknown): string | undefined {
  if (!result || typeof result !== "object") return undefined;
  const { uuid, id } = result as OpenEMRCreateResult;
@@ -49,6 +46,7 @@ class OpenEMRClient {
  private readonly tokenProvider: (force?: boolean) => Promise<string>;
  private readonly apiBase: string;
  private readonly fhirBase: string;
+ private tokenCache: Promise<string> | null = null;
 
  constructor(
   tokenProvider: (force?: boolean) => Promise<string> = getAccessToken,
@@ -57,6 +55,16 @@ class OpenEMRClient {
   this.tokenProvider = tokenProvider;
   this.apiBase = apiBase.replace(/\/+$/, "");
   this.fhirBase = `${this.apiBase}/fhir`;
+ }
+
+ private accessToken(force = false): Promise<string> {
+  if (force || !this.tokenCache) {
+   this.tokenCache = this.tokenProvider(force).catch((e) => {
+    this.tokenCache = null;
+    throw e;
+   });
+  }
+  return this.tokenCache;
  }
 
  private async request<T>(
@@ -94,9 +102,9 @@ class OpenEMRClient {
    }
   };
 
-  let res = await send(await this.tokenProvider());
+  let res = await send(await this.accessToken());
   if (res.status === 401) {
-   res = await send(await this.tokenProvider(true));
+   res = await send(await this.accessToken(true));
   }
 
   const text = await res.text();
@@ -121,12 +129,10 @@ class OpenEMRClient {
   return json as T;
  }
 
- /** Raw FHIR GET (for path-only resources such as /metadata). */
  fhirGet<T = unknown>(path: string): Promise<T> {
   return this.request(this.fhirBase, path.startsWith("/") ? path : `/${path}`);
  }
 
- /** Raw FHIR POST (for operations). */
  fhirPost<T = unknown>(
   path: string,
   body: Record<string, unknown>,
@@ -137,7 +143,6 @@ class OpenEMRClient {
   });
  }
 
- /** FHIR read of a single resource. */
  fhirRead<R extends FhirResource = FhirResource>(
   resourceType: string,
   id: string,
@@ -145,7 +150,6 @@ class OpenEMRClient {
   return this.request(this.fhirBase, `/${resourceType}/${id}`);
  }
 
- /** FHIR search (returns a Bundle). */
  fhirSearch(
   resourceType: string,
   params: Record<string, QueryValue | QueryValue[]>,
@@ -153,7 +157,6 @@ class OpenEMRClient {
   return this.request(this.fhirBase, `/${resourceType}`, { query: params });
  }
 
- /** FHIR create. Returns the created resource (or an id envelope). */
  fhirCreate<R = FhirResource>(
   resourceType: string,
   resource: Record<string, unknown>,
@@ -164,7 +167,6 @@ class OpenEMRClient {
   });
  }
 
- /** FHIR update. Returns the updated resource. */
  fhirUpdate<R extends FhirResource = FhirResource>(
   resourceType: string,
   id: string,
@@ -176,7 +178,6 @@ class OpenEMRClient {
   });
  }
 
- /** Standard OpenEMR GET; unwraps the `data` array from the envelope. */
  async standardGet<T = Record<string, unknown>>(
   path: string,
   params?: Record<string, QueryValue>,
@@ -187,7 +188,6 @@ class OpenEMRClient {
   return unwrapStandard<T>(env);
  }
 
- /** Standard OpenEMR POST; returns the wrapped data array. */
  async standardPost<T = Record<string, unknown>>(
   path: string,
   body: Record<string, unknown>,
@@ -200,7 +200,6 @@ class OpenEMRClient {
   return unwrapStandard<T>(env);
  }
 
- /** Standard OpenEMR PUT; returns the wrapped data array. */
  async standardPut<T = Record<string, unknown>>(
   path: string,
   body: Record<string, unknown>,
@@ -213,11 +212,6 @@ class OpenEMRClient {
   return unwrapStandard<T>(env);
  }
 
- /**
-  * Standard OpenEMR DELETE; returns the wrapped data array. OpenEMR answers
-  * `200` even for a rejected/absent record, so validation messages are still
-  * inspected by `assertNoValidationError`.
-  */
  async standardDelete<T = Record<string, unknown>>(
   path: string,
   query?: Record<string, QueryValue>,
@@ -231,10 +225,6 @@ class OpenEMRClient {
  }
 }
 
-/**
- * Some standard OpenEMR endpoints wrap payloads in `{ data: [...] }`, while a few
- * (e.g. /api/version) return a flat object. Normalize both into an array.
- */
 function unwrapStandard<T>(env: unknown): T[] {
  if (env === null || env === undefined) return [];
  if (Array.isArray(env)) return env as T[];
@@ -255,13 +245,6 @@ function safeParse(text: string): unknown {
  }
 }
 
-/**
- * OpenEMR's Standard write routes answer **HTTP 200** even when the payload is rejected,
- * using one of two body shapes:
- *  - raw validation messages: `{ <field>: { <CODE>: "<message>" } }` (e.g. appointments), or
- *  - the uniform processing result: `{ validationErrors, internalErrors, data }` (e.g. encounters).
- * Detect both so a rejected write isn't mistaken for success.
- */
 function assertNoValidationError(env: unknown): void {
  if (!env || typeof env !== "object" || Array.isArray(env)) return;
  const record = env as Record<string, unknown>;
@@ -277,7 +260,6 @@ function assertNoValidationError(env: unknown): void {
   return;
  }
 
- // Raw validation-messages object: every top-level value is a field -> message map.
  if ("data" in record || "id" in record) return;
  const fields = Object.values(record);
  if (fields.length === 0) return;
@@ -307,7 +289,6 @@ function throwIfMessages(messages: string[], env: unknown): void {
  );
 }
 
-/** Shared singleton backed by env config. */
 export const openemr = new OpenEMRClient();
 
 export default OpenEMRClient;

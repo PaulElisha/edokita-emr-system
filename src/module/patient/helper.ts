@@ -1,4 +1,3 @@
-/** @format */
 import APIError from "@error/APIError.ts";
 import type OpenEMRClient from "@module/openemr/client.ts";
 import type { CreatePatientInput } from "@module/patient/patient.service.ts";
@@ -6,15 +5,12 @@ import type { FhirPatient } from "@shared/types/fhir.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { buildContactPoints, buildHumanName } from "@shared/utils/fhir.ts";
+import { findUserById } from "@module/user/helper.ts";
+import type { RequestActor } from "@module/auth/helper.ts";
 
-/** OpenEMR stores the numeric `pid` as an official FHIR Patient identifier. */
 const PID_SYSTEM = "http://terminology.hl7.org/CodeSystem/v2-0203";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * OpenEMR's Standard API keys most patient sub-routes off the numeric `pid`, while FHIR
- * (and our API) use the Patient uuid. Resolve one from the other via the FHIR Patient.
- */
 export async function resolvePatientPid(
  client: OpenEMRClient,
  patientUuid: string,
@@ -32,13 +28,6 @@ export async function resolvePatientPid(
  }
 }
 
-/**
- * OpenEMR's vitals Standard route keys off the numeric encounter `eid`. Posting
- * with the encounter uuid silently stores the vitals unlinked (`encounter = 0`),
- * hiding them from the encounter and from author attribution. Resolve the
- * numeric id via the patient's Standard encounter list. `patientId` may be the
- * patient uuid; the list route requires it.
- */
 export async function resolveEncounterEid(
  client: OpenEMRClient,
  patientId: string,
@@ -62,6 +51,30 @@ export async function resolveEncounterEid(
  } catch (e) {
   return [null, toError(e)];
  }
+}
+
+export async function resolveOwnPatientId(
+ userId: string,
+): Promise<Result<string>> {
+ const [user, err] = await findUserById(userId);
+ if (err || !user) return [null, err];
+ const patientId = user.openemr.patientId;
+ if (!patientId) {
+  return [
+   null,
+   APIError.badRequest("Your account is not linked to an OpenEMR patient record"),
+  ];
+ }
+ return [patientId, null];
+}
+
+export async function resolvePatientScope(
+ actor: RequestActor,
+ requested?: string,
+): Promise<Result<string>> {
+ if (actor.role === "patient") return resolveOwnPatientId(actor.userId);
+ if (!requested) return [null, APIError.badRequest("patientId is required")];
+ return [requested, null];
 }
 
 export const GENDER_MAP: Record<string, string> = {

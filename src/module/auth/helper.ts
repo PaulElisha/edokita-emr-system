@@ -1,4 +1,3 @@
-/** @format */
 import { db } from "@db/db.ts";
 import type { DbClient } from "@db/transaction.ts";
 import { openemrAuthStates, openemrTokens } from "@db/schema/openemr.ts";
@@ -36,7 +35,6 @@ export interface OpenEMRTokenSet {
  updatedAt: Date;
 }
 
-/** Token payload accepted by {@link saveTokens}; ownership/timestamps are set here. */
 export type SaveTokenInput = Omit<OpenEMRTokenSet, "userId" | "updatedAt">;
 
 export interface PendingAuth {
@@ -145,11 +143,6 @@ export function decodeIdTokenClaims(idToken?: string): Result<IdTokenClaims> {
  ];
 }
 
-/**
- * OpenEMR injects `nonce` and `site:*` into the granted scope string. Neither
- * is a real scope, and OpenEMR's own refresh validation rejects them, so strip
- * them before storing or echoing the scope back.
- */
 export function cleanScope(scope: string | null | undefined): string | null {
  if (!scope) return null;
  const cleaned = scope
@@ -247,15 +240,6 @@ export async function clearTokens(userId: string): Promise<Result<void>> {
  }
 }
 
-/**
- * Invalidates the OpenEMR *access* token while retaining the refresh token.
- *
- * Used on logout for the "middle ground": the live session is severed
- * immediately (no usable access token), but the stored refresh token lets the
- * next login re-establish the OpenEMR session without re-running the password
- * grant — decoupling day-to-day auto-connect from OpenEMR's password policy
- * until the refresh token itself expires (~90 days).
- */
 export async function clearAccessToken(userId: string): Promise<Result<void>> {
  try {
   await db
@@ -318,19 +302,9 @@ export async function takePending(state: string): Promise<Result<PendingAuth>> {
  }
 }
 
-// ---------------------------------------------------------------------------
-// App session tokens (JWT access token + opaque refresh token)
-// ---------------------------------------------------------------------------
-
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const RESET_TTL_MS = 60 * 60 * 1000;
 
-/**
- * Inactivity window (days). Refresh tokens rotate on every use, so the presented
- * token's `createdAt` is the last time the user did anything on the app. Once
- * that is older than this window, the session is considered abandoned and its
- * refresh tokens are revoked, forcing a fresh login.
- */
 const IDLE_WINDOW_DAYS = 3;
 
 export interface AuthResult {
@@ -339,9 +313,17 @@ export interface AuthResult {
  refreshToken: string;
 }
 
-/** Extracts the authenticated user id from the request JWT payload. */
+export interface RequestActor {
+ userId: string;
+ role: JwtPayload["role"];
+}
+
 export function requireUserId(req: { user: JwtPayload }): string {
  return req.user.userId;
+}
+
+export function actor(req: { user: JwtPayload }): RequestActor {
+ return { userId: req.user.userId, role: req.user.role };
 }
 
 export interface IssuedRefreshToken {
@@ -349,17 +331,14 @@ export interface IssuedRefreshToken {
  expiresAt: Date;
 }
 
-/** Opaque high-entropy token (raw value returned to the client once). */
 function generateToken(): string {
  return generateRandomState();
 }
 
-/** Tokens are persisted hashed so a DB leak cannot be replayed. */
 function hashToken(raw: string): string {
  return createHash("sha256").update(raw).digest("hex");
 }
 
-/** Mints an app access token + refresh token for a newly authenticated user. */
 export async function issueSession(user: User): Promise<Result<AuthResult>> {
  const token = await signAppToken({
   userId: user.id,
@@ -392,11 +371,9 @@ export async function issueRefreshToken(
 
 export interface VerifiedRefreshToken {
  userId: string;
- /** When this token was issued; equals the last refresh = last app activity. */
  createdAt: Date;
 }
 
-/** Validates a refresh token and returns its owner + issue time (not revoked/expired). */
 export async function verifyRefreshToken(
  raw: string,
 ): Promise<Result<VerifiedRefreshToken>> {
@@ -421,7 +398,6 @@ export async function verifyRefreshToken(
  }
 }
 
-/** True when the given last-activity time is older than the idle window. */
 export function isIdle(lastActivity: Date): boolean {
  return isBefore(lastActivity, subDays(new Date(), IDLE_WINDOW_DAYS));
 }
@@ -454,7 +430,6 @@ export async function revokeUserRefreshTokens(
  }
 }
 
-/** Issues a single-use password-reset token (raw value returned to the caller). */
 export async function issuePasswordResetToken(
  userId: string,
 ): Promise<Result<string>> {
@@ -470,7 +445,6 @@ export async function issuePasswordResetToken(
  }
 }
 
-/** Consumes a reset token, returning the user id; marks the token used. */
 export async function consumePasswordResetToken(
  raw: string,
 ): Promise<Result<string>> {

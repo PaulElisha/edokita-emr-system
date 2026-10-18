@@ -1,4 +1,3 @@
-/** @format */
 import { env as loadEnv } from "custom-env";
 import { defineConfig } from "drizzle-kit";
 

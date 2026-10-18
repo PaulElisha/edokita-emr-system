@@ -1,4 +1,3 @@
-/** @format */
 import OpenEMRClient, { openemr } from "@module/openemr/client.ts";
 import type { RegisterInput } from "@module/auth/auth.service.ts";
 import PatientService from "@module/patient/patient.service.ts";
@@ -9,35 +8,67 @@ import type {
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { createOpenEMRLogin } from "@module/openemr/admin-ui.ts";
+import APIError from "@error/APIError.ts";
+import { forget, remember } from "@epic-web/remember";
 import { randomInt } from "node:crypto";
 
-/** Provisioning outcome: the FHIR link plus any OpenEMR login we minted. */
 export interface OpenEMRProvisionResult {
  link: OpenEMRProvision;
  credentials?: OpenEMRCredentials;
 }
 
-/** Looks up the OpenEMR user backing an app user's email (retries for API lag). */
+export interface OpenEMRUser {
+ id?: number | string;
+ uuid?: string;
+ username?: string;
+ email?: string;
+ fname?: string;
+ lname?: string;
+ specialty?: string | null;
+ npi?: string | null;
+}
+
+const USERS_KEY = "openemr:user-directory";
+const USERS_TTL_MS = 60_000;
+let usersExpiresAt = 0;
+
+export function listOpenEMRUsers(
+ client: OpenEMRClient = openemr,
+): Promise<OpenEMRUser[]> {
+ if (Date.now() >= usersExpiresAt) forget(USERS_KEY);
+ return remember(USERS_KEY, async () => {
+  const users = await client.standardGet<OpenEMRUser>("/api/user");
+  usersExpiresAt = Date.now() + USERS_TTL_MS;
+  return users;
+ }).catch((e) => {
+  usersExpiresAt = 0;
+  forget(USERS_KEY);
+  throw e;
+ });
+}
+
 async function resolveAccountByEmail(
  client: OpenEMRClient,
  email: string,
 ): Promise<Result<{ id: number; uuid: string }>> {
- const target = email.toLowerCase();
- const users = await client.standardGet<{
-  id?: number | string;
-  uuid?: string;
-  email?: string;
- }>("/api/user");
- const found = users.find(
-  (u) => (u.email ?? "").toLowerCase() === target && u.uuid,
- );
- if (found?.uuid) {
+ try {
+  const target = email.toLowerCase();
+  const users = await listOpenEMRUsers(client);
+  const found = users.find(
+   (u) => (u.email ?? "").toLowerCase() === target && u.uuid,
+  );
+  if (!found?.uuid) {
+   return [
+    null,
+    APIError.openEmr(`OpenEMR user not found after creation: ${email}`),
+   ];
+  }
   return [{ id: Number(found.id), uuid: found.uuid }, null];
+ } catch (e) {
+  return [null, toError(e, "resolveAccountByEmail")];
  }
- return [null, new Error("OpenEMR user not found after creation")];
 }
 
-/** Generates a password satisfying OpenEMR's policy (upper/lower/digit/special). */
 export function generateOpenEMRPassword(): string {
  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
  const lower = "abcdefghijkmnpqrstuvwxyz";
@@ -54,19 +85,11 @@ export function generateOpenEMRPassword(): string {
  return chars.join("");
 }
 
-/**
- * Provisions the OpenEMR side of registration.
- *
- * Doctors are created through the Users admin (`createOpenEMRLogin`) rather than
- * a FHIR Practitioner create, because only the admin path creates the
- * `users_secure` login row a password grant needs. The resulting `users` row is
- * still exposed as a FHIR Practitioner (same uuid), so the link is unchanged.
- */
 export async function provisionOpenEMR(
  input: RegisterInput,
 ): Promise<Result<OpenEMRProvisionResult>> {
  try {
-  if (input.role === "doctor") {
+  if (input.role === "doctor" || input.role === "lab") {
    const password = generateOpenEMRPassword();
    const [, createErr] = await createOpenEMRLogin({
     username: input.email,
@@ -75,15 +98,12 @@ export async function provisionOpenEMR(
     lastName: input.lastName,
     email: input.email,
     npi: input.npi,
-    group: "Physicians",
+    group: input.role === "doctor" ? "Physicians" : "Clinicians",
    });
-   if (createErr) {
-    return [null, createErr];
-   }
+   if (createErr) return [null, createErr];
+
    const [account, aErr] = await resolveAccountByEmail(openemr, input.email);
-   if (aErr || !account) {
-    return [null, aErr];
-   }
+   if (aErr || !account) return [null, aErr];
    return [
     {
      link: { practitionerId: account.uuid },
@@ -92,31 +112,7 @@ export async function provisionOpenEMR(
     null,
    ];
   }
-  if (input.role === "lab") {
-   const password = generateOpenEMRPassword();
-   const [, createErr] = await createOpenEMRLogin({
-    username: input.email,
-    password,
-    firstName: input.firstName,
-    lastName: input.lastName,
-    email: input.email,
-    group: "Clinicians",
-   });
-   if (createErr) {
-    return [null, createErr];
-   }
-   const [account, aErr] = await resolveAccountByEmail(openemr, input.email);
-   if (aErr || !account) {
-    return [null, aErr];
-   }
-   return [
-    {
-     link: { practitionerId: account.uuid },
-     credentials: { username: input.email, password },
-    },
-    null,
-   ];
-  }
+
   if (input.role === "patient") {
    const [created, err] = await PatientService.create(openemr, {
     fname: input.firstName,
@@ -126,14 +122,13 @@ export async function provisionOpenEMR(
     email: input.email,
     phone: input.phone,
    });
-   if (err || !created) {
-    return [null, err];
-   }
+   if (err || !created) return [null, err];
    return [
     { link: { patientId: created.id ? String(created.id) : undefined } },
     null,
    ];
   }
+
   if (input.role === "admin") {
    try {
     await createOpenEMRLogin({
@@ -144,13 +139,12 @@ export async function provisionOpenEMR(
      email: input.email,
      group: "Administrators",
     });
-   } catch (e) {
-    // best effort; don't block registration
+   } catch {
+    // Admins can log into OpenEMR later; never block registration on this.
    }
-   return [{ link: {} }, null];
   }
   return [{ link: {} }, null];
  } catch (e) {
-  return [null, toError(e)];
+  return [null, toError(e, "provisionOpenEMR")];
  }
 }

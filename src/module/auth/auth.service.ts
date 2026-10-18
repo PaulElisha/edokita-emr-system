@@ -1,4 +1,3 @@
-/** @format */
 import APIError from "@error/APIError.ts";
 import logger from "@app/logger.ts";
 import { provisionOpenEMR } from "@module/openemr/helpers.ts";
@@ -91,7 +90,6 @@ export interface RefreshResult {
 
 export interface ForgotPasswordResult {
  success: true;
- /** Present only outside production (no mailer configured). */
  resetToken?: string;
 }
 
@@ -157,8 +155,6 @@ class AuthService {
    if (!valid) {
     return [null, APIError.unauthorized("Invalid email or password")];
    }
-   // Best-effort: re-establish the OpenEMR session from stored credentials so a
-   // fresh app login also reconnects the user to OpenEMR.
    await this.autoConnectOpenEMR(user.id);
    const [auth, authErr] = await issueSession(user);
    if (authErr || !auth) return [null, authErr];
@@ -168,17 +164,10 @@ class AuthService {
   }
  };
 
- /**
-  * Reconnects a user's OpenEMR session at login. Prefers the stored OpenEMR
-  * refresh token (passwordless); only falls back to the password grant when no
-  * usable refresh token exists (never connected, or it has expired/been
-  * revoked). Never throws: auto-connect must not block a valid app login.
-  */
  private autoConnectOpenEMR = async (userId: string): Promise<void> => {
   try {
    const [tokens] = await getTokens(userId);
    if (tokens?.refreshToken) {
-    // Passwordless: returns a still-valid access token or refreshes it.
     const [accessToken, rErr] = await getOpenEMRToken(userId);
     if (!rErr && accessToken) return;
     logger.warn(
@@ -207,8 +196,6 @@ class AuthService {
   const [verified, err] = await verifyRefreshToken(input.refreshToken);
   if (err || !verified) return [null, err];
   const { userId, createdAt } = verified;
-  // Inactivity: refresh tokens rotate on use, so createdAt is the last
-  // activity. Past the idle window, revoke and force a fresh login.
   if (isIdle(createdAt)) {
    await revokeUserRefreshTokens(userId);
    return [
@@ -220,7 +207,6 @@ class AuthService {
   }
   const [user, findErr] = await findUserById(userId);
   if (!user) return [null, findErr];
-  // Rotate: revoke the presented token and issue a fresh pair.
   await revokeUserRefreshTokens(userId);
   const [issued, ierr] = await issueSession(user);
   if (ierr || !issued) return [null, ierr];
@@ -247,7 +233,6 @@ class AuthService {
    }
    const [, uerr] = await updatePasswordHash(userId, hash);
    if (uerr) return [null, uerr];
-   // Force re-authentication everywhere after a password change.
    await revokeUserRefreshTokens(userId);
    await bumpSessionEpoch(userId);
    return [{ success: true }, null];
@@ -261,7 +246,6 @@ class AuthService {
  ): Promise<Result<ForgotPasswordResult>> => {
   try {
    const [user] = await findUserByEmail(input.email);
-   // Do not leak whether the email exists.
    if (!user) return [{ success: true }, null];
    const [token, err] = await issuePasswordResetToken(user.id);
    if (err || !token) return [null, err];
@@ -298,12 +282,8 @@ class AuthService {
  logout = async (userId: string): Promise<Result<LogoutResult>> => {
   const [, rerr] = await revokeUserRefreshTokens(userId);
   if (rerr) return [null, rerr];
-  // Instant revocation: advance the session epoch so every access JWT already
-  // issued for this user is rejected on its next request.
   const [, eerr] = await bumpSessionEpoch(userId);
   if (eerr) return [null, eerr];
-  // Middle ground: revoke the app session + OpenEMR access token, but retain the
-  // OpenEMR refresh token so the next login can reconnect without the password.
   const [, err] = await clearAccessToken(userId);
   if (err) return [null, err];
   return [{ success: true }, null];

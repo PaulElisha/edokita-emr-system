@@ -1,35 +1,39 @@
-/** @format */
 import { z } from "zod";
 import { db } from "@db/db.ts";
 import { appointmentWaitlist } from "@db/schema/appointment.ts";
-import { roleSchema } from "@db/schema/role.ts";
-import { findUserById } from "@module/user/helper.ts";
+import type { RequestActor } from "@module/auth/helper.ts";
+import {
+ resolveOwnPatientId,
+ resolvePatientScope,
+} from "@module/patient/helper.ts";
 import APIError from "@error/APIError.ts";
 import { countParam } from "@shared/schemas/common.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { and, desc, eq } from "drizzle-orm";
 
-export interface WaitlistActor {
- role: z.infer<typeof roleSchema>;
- userId: string;
-}
+export type WaitlistActor = RequestActor;
 
-export const waitlistBodySchema = z.object({
- patientId: z.string().optional(),
- practitionerId: z.string().optional(),
- preferredDate: z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
-  .optional(),
- reason: z.string().max(2000).optional(),
-});
+export const waitlistBodySchema = z
+ .object({
+  patientId: z.string().optional(),
+  practitionerId: z.string().optional(),
+  preferredDate: z
+   .string()
+   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
+   .optional(),
+  reason: z.string().max(2000).optional(),
+ })
+ .refine((v) => v.preferredDate !== undefined || v.reason !== undefined, {
+  message: "preferredDate or reason is required",
+  path: ["reason"],
+ });
 export type CreateWaitlistInput = z.infer<typeof waitlistBodySchema>;
 
 export const waitlistQuerySchema = z.object({
  status: z.string().optional(),
  patientId: z.string().optional(),
- _count: countParam,
+ _count: countParam.default(100),
 });
 export type WaitlistQuery = z.infer<typeof waitlistQuerySchema>;
 
@@ -44,7 +48,7 @@ class WaitlistService {
   try {
    const conditions = [];
    if (actor.role === "patient") {
-    const [patientId, err] = await this.ownPatientId(actor.userId);
+    const [patientId, err] = await resolveOwnPatientId(actor.userId);
     if (err || !patientId) return [null, err];
     conditions.push(eq(appointmentWaitlist.patientId, patientId));
    } else if (query.patientId) {
@@ -59,7 +63,7 @@ class WaitlistService {
     .from(appointmentWaitlist)
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(appointmentWaitlist.createdAt))
-    .limit(Number(query._count ?? 100));
+    .limit(query._count);
 
    return [{ total: rows.length, items: rows }, null];
   } catch (e) {
@@ -72,13 +76,8 @@ class WaitlistService {
   actor: WaitlistActor,
  ): Promise<Result<WaitlistEntry>> => {
   try {
-   let patientId = input.patientId;
-   if (actor.role === "patient") {
-    const [own, err] = await this.ownPatientId(actor.userId);
-    if (err || !own) return [null, err];
-    patientId = own;
-   }
-   if (!patientId) return [null, APIError.badRequest("patientId is required")];
+   const [patientId, perr] = await resolvePatientScope(actor, input.patientId);
+   if (perr || !patientId) return [null, perr];
 
    const [row] = await db
     .insert(appointmentWaitlist)
@@ -109,7 +108,7 @@ class WaitlistService {
    if (!row) return [null, APIError.notFound("Waitlist entry not found")];
 
    if (actor.role === "patient") {
-    const [own, err] = await this.ownPatientId(actor.userId);
+    const [own, err] = await resolveOwnPatientId(actor.userId);
     if (err || !own) return [null, err];
     if (row.patientId !== own) {
      return [null, APIError.notFound("Waitlist entry not found")];
@@ -121,21 +120,6 @@ class WaitlistService {
   } catch (e) {
    return [null, toError(e)];
   }
- };
-
- private ownPatientId = async (userId: string): Promise<Result<string>> => {
-  const [user, err] = await findUserById(userId);
-  if (err || !user) return [null, err];
-  const patientId = user.openemr.patientId;
-  if (!patientId) {
-   return [
-    null,
-    APIError.badRequest(
-     "Your account is not linked to an OpenEMR patient record",
-    ),
-   ];
-  }
-  return [patientId, null];
  };
 }
 

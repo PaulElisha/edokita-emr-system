@@ -1,4 +1,3 @@
-/** @format */
 import asyncHandler from "@middleware/async-handler.ts";
 import type { IdParam } from "@shared/schemas/params.ts";
 import type { OpenEMRRequest } from "@shared/http.ts";

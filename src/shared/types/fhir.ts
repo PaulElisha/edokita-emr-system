@@ -1,7 +1,3 @@
-/**
- * FHIR R4 types re-exported from `@types/fhir` (ambient `fhir4` namespace) under
- * the `Fhir*` aliases used across the OpenEMR gateway.
- */
 export type FhirAllergyIntolerance = fhir4.AllergyIntolerance;
 export type FhirAddress = fhir4.Address;
 export type FhirAppointment = fhir4.Appointment;
@@ -25,7 +21,6 @@ export type FhirReference = fhir4.Reference;
 export type FhirResource = fhir4.Resource;
 export type FhirValueSet = fhir4.ValueSet;
 
-/** The "clinical list" resources the EMR gateway reads and normalizes. */
 export type FhirClinicalResource =
  | fhir4.Condition
  | fhir4.AllergyIntolerance

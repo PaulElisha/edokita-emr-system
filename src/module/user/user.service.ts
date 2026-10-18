@@ -1,4 +1,3 @@
-/** @format */
 import { getTokens } from "@module/auth/helper.ts";
 import type { Result } from "@shared/types.ts";
 import {
@@ -23,10 +22,6 @@ class UserService {
   const [user, err] = await findUserById(userId);
   if (err || !user) return [null, err];
   const [tokens] = await getTokens(userId);
-  // A retained OpenEMR refresh token (post-logout) is not a live session, so
-  // "connected" reflects a usable access token only. Patients never hold a
-  // per-user token (they read EMR via the shared service account), so their
-  // connection is their linked OpenEMR patient record.
   const connected =
    user.role === "patient"
     ? Boolean(user.openemr.patientId)

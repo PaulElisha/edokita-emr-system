@@ -1,4 +1,3 @@
-/** @format */
 import { authenticate } from "@middleware/auth.ts";
 import AuthController from "@module/auth/auth.controller.ts";
 import validate from "@middleware/validation.ts";
@@ -20,7 +19,6 @@ class AuthRouter {
  }
 
  initializeRoutes() {
-  // Public routes.
   this.router.post(
    "/register",
    validate(registerSchema),

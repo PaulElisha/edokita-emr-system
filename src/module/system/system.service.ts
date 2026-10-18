@@ -1,4 +1,3 @@
-/** @format */
 import { OpenEMR } from "@/env.ts";
 import { openemr } from "@module/openemr/client.ts";
 import type { Result } from "@shared/types.ts";

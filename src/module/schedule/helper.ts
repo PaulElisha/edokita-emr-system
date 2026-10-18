@@ -1,4 +1,3 @@
-/** @format */
 import { db } from "@db/db.ts";
 import { providerSchedules } from "@db/schema/appointment.ts";
 import { OpenEMR } from "@/env.ts";
@@ -22,7 +21,6 @@ export interface WorkingHours {
  slotMinutes: number;
 }
 
-/** Maps a persisted schedule row to the API shape. */
 export function toEntry(
  row: typeof providerSchedules.$inferSelect,
 ): ScheduleEntry {
@@ -37,10 +35,6 @@ export function toEntry(
  };
 }
 
-/**
- * Resolves a provider's working hours for a date, falling back to the global
- * env defaults when no schedule is configured.
- */
 export async function resolveWorkingHours(
  practitionerId: string,
  date: Date,

@@ -1,4 +1,3 @@
-/** @format */
 import { Env } from "@/env.ts";
 import type { UserRole } from "@db/schema/role.ts";
 import { readFileSync } from "node:fs";
@@ -17,18 +16,12 @@ const KID = "edokita-api-key-1";
 const ISSUER = "e-dokita";
 const AUDIENCE = "e-dokita-api";
 
-/**
- * App access-token lifetime. Kept short so that, because the JWT is stateless
- * and cannot be revoked early, a logged-out session's token stops working
- * quickly. Clients renew via the (revocable) opaque refresh token.
- */
 const ACCESS_TOKEN_TTL = "15m";
 
 export interface JwtPayload extends JWTPayload {
  userId: string;
  role: UserRole;
  email: string;
- /** Session epoch at issue time; a mismatch with the DB means revocation. */
  sessionEpoch?: number;
 }
 
@@ -80,7 +73,6 @@ export async function verifyAppToken(token: string): Promise<JwtPayload> {
  return <JwtPayload>payload;
 }
 
-/** Decodes a JWT's payload segment without verifying the signature. */
 export function decodeJwtPayload(
  token?: string,
 ): Record<string, unknown> | null {

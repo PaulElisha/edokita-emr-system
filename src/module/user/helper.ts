@@ -1,5 +1,3 @@
-/** @format */
-
 import { db } from "@db/db.ts";
 import type { DbClient } from "@db/transaction.ts";
 import { roles, roleSchema, type UserRole } from "@db/schema/role.ts";
@@ -25,14 +23,12 @@ export type OpenEMRLink = z.infer<typeof openEMRLinkSchema>;
 export const openEMRLinkUpdateSchema = openEMRLinkSchema.partial();
 export type OpenEMRLinkUpdate = z.infer<typeof openEMRLinkUpdateSchema>;
 
-/** Fields OpenEMR provisioning can populate at registration time. */
 export const openEMRProvisionSchema = openEMRLinkSchema.pick({
  patientId: true,
  practitionerId: true,
 });
 export type OpenEMRProvision = z.infer<typeof openEMRProvisionSchema>;
 
-/** Per-user OpenEMR login credentials minted at provisioning time. */
 export interface OpenEMRCredentials {
  username: string;
  password: string;
@@ -52,8 +48,6 @@ export const userSchema = z.object({
 });
 export type User = z.infer<typeof userSchema>;
 
-// `sessionEpoch` is an internal revocation counter (embedded in the JWT), never
-// exposed to clients.
 export type PublicUser = Omit<User, "passwordHash" | "sessionEpoch">;
 
 export const createUserSchema = userSchema
@@ -123,7 +117,6 @@ export async function findUserById(
  return [toUser({ ...row.user, role: row.role as UserRole }), null];
 }
 
-/** Finds the app user linked to an OpenEMR patient uuid (if any). */
 export async function findUserByPatientId(
  patientId: string,
 ): Promise<Result<User>> {
@@ -137,7 +130,6 @@ export async function findUserByPatientId(
  return [toUser({ ...row.user, role: row.role as UserRole }), null];
 }
 
-/** Finds the app user linked to an OpenEMR practitioner uuid (if any). */
 export async function findUserByPractitionerId(
  practitionerId: string,
 ): Promise<Result<User>> {
@@ -151,10 +143,6 @@ export async function findUserByPractitionerId(
  return [toUser({ ...row.user, role: row.role as UserRole }), null];
 }
 
-/**
- * Maps OpenEMR practitioner uuids to clinician display names ("First Last").
- * Used to attribute EMR records to the doctor OpenEMR reports as author.
- */
 export async function findUserNamesByPractitionerIds(
  ids: string[],
 ): Promise<Map<string, string>> {
@@ -180,9 +168,6 @@ export async function findUserNamesByPractitionerIds(
  );
 }
 
-/**
- * Resolves the OpenEMR practitioner uuid linked to a doctor's account.
- */
 export async function findUserPractitionerId(
  userId: string,
 ): Promise<Result<string>> {
@@ -263,7 +248,6 @@ export async function updateUser(
  return applyUserPatch(id, patch);
 }
 
-/** Persists a new password hash for a user (password change/reset flows). */
 export async function updatePasswordHash(
  id: string,
  passwordHash: string,
@@ -277,11 +261,6 @@ export async function updatePasswordHash(
  return [undefined, null];
 }
 
-/**
- * Advances the user's session epoch, instantly invalidating every access JWT
- * already minted for them (they carry the old epoch). Used on logout and on
- * credential changes to force re-authentication immediately.
- */
 export async function bumpSessionEpoch(id: string): Promise<Result<void>> {
  const [row] = await db
   .update(users)
@@ -292,10 +271,6 @@ export async function bumpSessionEpoch(id: string): Promise<Result<void>> {
  return [undefined, null];
 }
 
-/**
- * Persists the per-user OpenEMR login used for password-grant auto-connect. The
- * password is encrypted with the shared AES-256-GCM secret key.
- */
 export async function saveOpenEMRCredentials(
  id: string,
  credentials: OpenEMRCredentials,
@@ -318,7 +293,6 @@ export async function saveOpenEMRCredentials(
  }
 }
 
-/** Returns the decrypted OpenEMR login for a user, or an error if not stored. */
 export async function getOpenEMRCredentials(
  id: string,
 ): Promise<Result<OpenEMRCredentials>> {
@@ -340,7 +314,6 @@ export async function getOpenEMRCredentials(
  ];
 }
 
-/** Applies a partial update and returns the refreshed user (no-op if empty). */
 async function applyUserPatch(
  id: string,
  patch: Partial<UserRow>,

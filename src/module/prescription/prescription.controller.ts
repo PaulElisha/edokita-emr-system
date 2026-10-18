@@ -1,17 +1,12 @@
-/** @format */
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import type { IdParam } from "@shared/schemas/params.ts";
 import type { OpenEMRRequest } from "@shared/http.ts";
+import { actor } from "@module/auth/helper.ts";
 import type { Response } from "express";
 import PrescriptionService, {
  type CreatePrescriptionInput,
  type PrescriptionListQuery,
 } from "@module/prescription/prescription.service.ts";
-
-function actor(req: { user: JwtPayload }) {
- return { userId: req.user.userId, role: req.user.role };
-}
 
 class PrescriptionController {
  list = asyncHandler(

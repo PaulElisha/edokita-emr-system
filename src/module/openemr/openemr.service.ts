@@ -1,4 +1,3 @@
-/** @format */
 import { OpenEMR } from "@/env.ts";
 import {
  codeChallenge,
@@ -30,7 +29,6 @@ import type { Result } from "@shared/types.ts";
 import { withTransaction } from "@db/transaction.ts";
 import { z } from "zod";
 
-/** Per-role OpenEMR scope sets requested during the authorization-code flow. */
 export const ROLE_SCOPES: Record<string, string> = {
  patient:
   "openid offline_access api:fhir api:oemr patient/Patient.read patient/Observation.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Immunization.read patient/Procedure.read patient/Encounter.read patient/Appointment.read",
@@ -136,11 +134,6 @@ class OpenEMRService {
   }
  };
 
- /**
-  * Connects a user by exchanging their stored OpenEMR login through the
-  * password grant, then persists the resulting token set. Used for per-user
-  * auto-connect at login (no browser redirect required).
-  */
  connectWithCredentials = async (
   userId: string,
   credentials: OpenEMRCredentials,
@@ -164,7 +157,6 @@ class OpenEMRService {
   }
  };
 
- /** Persists the OpenEMR token set and links `subject`/`fhirUser` onto the user. */
  private async persistConnection(
   user: PublicUser,
   data: TokenResponse,

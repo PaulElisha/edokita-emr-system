@@ -1,4 +1,3 @@
-/** @format */
 import { Env } from "@/env.ts";
 import pino from "pino";
 

@@ -1,11 +1,12 @@
-/** @format */
 import { z } from "zod";
 import type OpenEMRClient from "@module/openemr/client.ts";
-import { resolvePatientPid } from "@module/patient/helper.ts";
+import {
+ resolvePatientPid,
+ resolvePatientScope,
+} from "@module/patient/helper.ts";
 import { resolveProviderId } from "@module/appointment/helper.ts";
 import { countParam } from "@shared/schemas/common.ts";
-import { roleSchema } from "@db/schema/role.ts";
-import { findUserById } from "@module/user/helper.ts";
+import type { RequestActor } from "@module/auth/helper.ts";
 import APIError from "@error/APIError.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
@@ -13,24 +14,17 @@ import { setDefined } from "@shared/utils/object.ts";
 
 export type PrescriptionRecord = Record<string, unknown>;
 
-export interface PrescriptionActor {
- role: z.infer<typeof roleSchema>;
- userId: string;
-}
+export type PrescriptionActor = RequestActor;
 
 export const prescriptionListQuerySchema = z.object({
  patientId: z.string().optional(),
- _count: countParam,
+ _count: countParam.default(100),
 });
 export type PrescriptionListQuery = z.infer<typeof prescriptionListQuerySchema>;
 
-/**
- * Subset of OpenEMR's `POST /api/prescription` allowlist our API exposes, in
- * camelCase. `patientId` (uuid) is translated to OpenEMR's numeric `patient_id`.
- */
 export const prescriptionBodySchema = z.object({
  patientId: z.string().min(1),
- providerId: z.string().optional(),
+ providerId: z.string().min(1),
  drug: z.string().min(1),
  drugId: z.string().optional(),
  rxnormDrugcode: z.string().optional(),
@@ -67,17 +61,14 @@ class PrescriptionService {
   actor: PrescriptionActor,
  ): Promise<Result<PrescriptionListResult>> => {
   try {
-   const [patientId, perr] = await this.resolveListPatient(
-    actor,
-    query.patientId,
-   );
+   const [patientId, perr] = await resolvePatientScope(actor, query.patientId);
    if (perr || !patientId) {
     return [null, perr];
    }
 
    const params: Record<string, string | number> = {
     patient_uuid: patientId,
-    _count: query._count ?? 100,
+    _count: query._count,
    };
    const items = await client.standardGet<PrescriptionRecord>(
     "/api/prescription",
@@ -109,15 +100,15 @@ class PrescriptionService {
   input: CreatePrescriptionInput,
  ): Promise<Result<PrescriptionRecord>> => {
   try {
-   const [pid, pe] = await resolvePatientPid(client, input.patientId);
+   const [[pid, pe], [providerId, perr]] = await Promise.all([
+    resolvePatientPid(client, input.patientId),
+    resolveProviderId(client, input.providerId),
+   ]);
    if (pe || !pid) return [null, pe];
+   if (perr || !providerId) return [null, perr];
 
    const payload = buildPrescriptionPayload(input, pid);
-   if (input.providerId) {
-    const [provider, per] = await resolveProviderId(client, input.providerId);
-    if (per || !provider) return [null, per];
-    payload.provider_id = provider;
-   }
+   payload.provider_id = providerId;
 
    const [created] = await client.standardPost<PrescriptionRecord>(
     "/api/prescription",
@@ -145,28 +136,6 @@ class PrescriptionService {
   }
  };
 
- /** Patients may only list their own prescriptions; staff must name a patient. */
- private resolveListPatient = async (
-  actor: PrescriptionActor,
-  requested?: string,
- ): Promise<Result<string>> => {
-  if (actor.role === "patient") {
-   const [user, err] = await findUserById(actor.userId);
-   if (err || !user) return [null, err];
-   const patientId = user.openemr.patientId;
-   if (!patientId) {
-    return [
-     null,
-     APIError.badRequest(
-      "Your account is not linked to an OpenEMR patient record",
-     ),
-    ];
-   }
-   return [patientId, null];
-  }
-  if (!requested) return [null, APIError.badRequest("patientId is required")];
-  return [requested, null];
- };
 }
 
 function buildPrescriptionPayload(

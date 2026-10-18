@@ -1,4 +1,3 @@
-/** @format */
 import { db } from "@db/db.ts";
 import { appointmentOverrides } from "@db/schema/appointment.ts";
 import type { MappedAppointment } from "@shared/utils/fhir-mapper.ts";
@@ -16,14 +15,12 @@ export interface OverrideInput {
  note?: string;
 }
 
-/** Terminal statuses that should suppress a booked slot. */
 const INACTIVE_STATUSES = new Set(["cancelled", "entered-in-error", "noshow"]);
 
 export function overrideIsInactive(status?: string | null): boolean {
  return status ? INACTIVE_STATUSES.has(status) : false;
 }
 
-/** Loads overrides for a set of appointment uuids, keyed by uuid. */
 export async function getOverrides(
  uuids: string[],
 ): Promise<Result<Map<string, AppointmentOverride>>> {
@@ -54,7 +51,6 @@ async function getOverride(
  }
 }
 
-/** Merges a local override onto a mapped appointment (no-op when absent). */
 export function applyOverride(
  appointment: MappedAppointment,
  override?: AppointmentOverride,
@@ -68,7 +64,6 @@ export function applyOverride(
  };
 }
 
-/** Merges local overrides onto a batch of mapped appointments. */
 export async function applyOverrides(
  appointments: MappedAppointment[],
 ): Promise<Result<MappedAppointment[]>> {
@@ -84,7 +79,6 @@ export async function applyOverrides(
  ];
 }
 
-/** Merges a local override onto a single appointment. */
 export async function applyOverrideById(
  appointment: MappedAppointment,
 ): Promise<Result<MappedAppointment>> {
@@ -94,7 +88,6 @@ export async function applyOverrideById(
  return [applyOverride(appointment, override ?? undefined), null];
 }
 
-/** Inserts or updates the local override for an appointment. */
 export async function upsertOverride(
  appointmentUuid: string,
  input: OverrideInput,

@@ -1,4 +1,3 @@
-/** @format */
 import { z } from "zod";
 import { db } from "@db/db.ts";
 import {
@@ -12,11 +11,12 @@ import {
  findUserByPatientId,
  findUserByPractitionerId,
 } from "@module/user/helper.ts";
-import { notify } from "@module/notification/notification.service.ts";
+import { notifyMany } from "@module/notification/notification.service.ts";
 import APIError from "@error/APIError.ts";
 import { countParam } from "@shared/schemas/common.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
+import { unique } from "@shared/utils/array.ts";
 import { asc, desc, eq, or } from "drizzle-orm";
 
 export interface MessageActor {
@@ -36,7 +36,7 @@ export const messageBodySchema = z.object({
 });
 export type SendMessageInput = z.infer<typeof messageBodySchema>;
 
-export const threadListQuerySchema = z.object({ _count: countParam });
+export const threadListQuerySchema = z.object({ _count: countParam.default(100) });
 export type ThreadListQuery = z.infer<typeof threadListQuerySchema>;
 
 export type ThreadRow = typeof conversationThreads.$inferSelect;
@@ -86,7 +86,7 @@ class MessagingService {
      .select()
      .from(conversationThreads)
      .orderBy(desc(conversationThreads.lastMessageAt))
-     .limit(Number(query._count ?? 100));
+     .limit(query._count);
     return [{ total: rows.length, items: rows }, null];
    }
 
@@ -100,9 +100,9 @@ class MessagingService {
     .select()
     .from(conversationThreads)
     .where(or(...filters))
-    .orderBy(desc(conversationThreads.lastMessageAt))
-    .limit(Number(query._count ?? 100));
-   return [{ total: rows.length, items: rows }, null];
+     .orderBy(desc(conversationThreads.lastMessageAt))
+     .limit(query._count);
+    return [{ total: rows.length, items: rows }, null];
   } catch (e) {
    return [null, toError(e)];
   }
@@ -150,13 +150,13 @@ class MessagingService {
   _query: ThreadListQuery,
  ): Promise<Result<ListResult<MessageRow>>> => {
   try {
-   const [thread, terr] = await this.loadThread(threadId, userId);
-   if (terr || !thread) return [null, terr];
+   const [loaded, terr] = await this.loadThread(threadId, userId);
+   if (terr || !loaded) return [null, terr];
 
    const rows = await db
     .select()
     .from(conversationMessages)
-    .where(eq(conversationMessages.threadId, thread.id))
+    .where(eq(conversationMessages.threadId, loaded.thread.id))
     .orderBy(asc(conversationMessages.createdAt));
    return [{ total: rows.length, items: rows }, null];
   } catch (e) {
@@ -170,10 +170,9 @@ class MessagingService {
   userId: string,
  ): Promise<Result<MessageRow>> => {
   try {
-   const [thread, terr] = await this.loadThread(threadId, userId);
-   if (terr || !thread) return [null, terr];
-   const [actor, aerr] = await resolveActor(userId);
-   if (aerr || !actor) return [null, aerr];
+   const [loaded, terr] = await this.loadThread(threadId, userId);
+   if (terr || !loaded) return [null, terr];
+   const { thread, actor } = loaded;
 
    const [row] = await db
     .insert(conversationMessages)
@@ -181,12 +180,13 @@ class MessagingService {
     .returning();
    if (!row) return [null, toError("Failed to send message")];
 
-   await db
-    .update(conversationThreads)
-    .set({ lastMessageAt: new Date() })
-    .where(eq(conversationThreads.id, thread.id));
-
-   await this.notifyRecipients(thread, actor);
+   await Promise.all([
+    db
+     .update(conversationThreads)
+     .set({ lastMessageAt: new Date() })
+     .where(eq(conversationThreads.id, thread.id)),
+    this.notifyRecipients(thread, actor),
+   ]);
    return [row, null];
   } catch (e) {
    return [null, toError(e)];
@@ -198,11 +198,11 @@ class MessagingService {
   userId: string,
  ): Promise<Result<{ success: true }>> => {
   try {
-   const [thread, terr] = await this.loadThread(threadId, userId);
-   if (terr || !thread) return [null, terr];
+   const [loaded, terr] = await this.loadThread(threadId, userId);
+   if (terr || !loaded) return [null, terr];
    await db
     .insert(threadReads)
-    .values({ threadId: thread.id, userId, lastReadAt: new Date() })
+    .values({ threadId: loaded.thread.id, userId, lastReadAt: new Date() })
     .onConflictDoUpdate({
      target: [threadReads.threadId, threadReads.userId],
      set: { lastReadAt: new Date() },
@@ -216,46 +216,44 @@ class MessagingService {
  private loadThread = async (
   threadId: string,
   userId: string,
- ): Promise<Result<ThreadRow>> => {
-  const [thread] = await db
-   .select()
-   .from(conversationThreads)
-   .where(eq(conversationThreads.id, threadId))
-   .limit(1);
+ ): Promise<Result<{ thread: ThreadRow; actor: ActorLinks }>> => {
+  const [[thread], [actor, err]] = await Promise.all([
+   db
+    .select()
+    .from(conversationThreads)
+    .where(eq(conversationThreads.id, threadId))
+    .limit(1),
+   resolveActor(userId),
+  ]);
   if (!thread) return [null, APIError.notFound("Conversation not found")];
-  const [actor, err] = await resolveActor(userId);
   if (err || !actor) return [null, err];
   if (!canAccess(thread, actor)) {
    return [null, APIError.notFound("Conversation not found")];
   }
-  return [thread, null];
+  return [{ thread, actor }, null];
  };
 
- /** Notifies the other party of a new message. */
  private notifyRecipients = async (
   thread: ThreadRow,
   actor: ActorLinks,
  ): Promise<void> => {
-  const recipientIds = new Set<string>();
-  if (thread.createdBy && thread.createdBy !== actor.userId) {
-   recipientIds.add(thread.createdBy);
-  }
-  if (thread.patientId) {
-   const [user] = await findUserByPatientId(thread.patientId);
-   if (user && user.id !== actor.userId) recipientIds.add(user.id);
-  }
-  if (thread.practitionerId) {
-   const [user] = await findUserByPractitionerId(thread.practitionerId);
-   if (user && user.id !== actor.userId) recipientIds.add(user.id);
-  }
-  for (const id of recipientIds) {
-   await notify(id, {
-    type: "message",
-    title: "New message",
-    body: thread.subject ?? "You have a new message",
-    data: { threadId: thread.id },
-   });
-  }
+  const [patient, practitioner] = await Promise.all([
+   thread.patientId ? findUserByPatientId(thread.patientId) : null,
+   thread.practitionerId
+    ? findUserByPractitionerId(thread.practitionerId)
+    : null,
+  ]);
+  const recipients = unique([
+   thread.createdBy,
+   patient?.[0]?.id,
+   practitioner?.[0]?.id,
+  ]).filter((id) => id !== actor.userId);
+  await notifyMany(recipients, {
+   type: "message",
+   title: "New message",
+   body: thread.subject ?? "You have a new message",
+   data: { threadId: thread.id },
+  });
  };
 }
 

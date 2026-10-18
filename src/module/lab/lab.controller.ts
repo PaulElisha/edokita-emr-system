@@ -1,7 +1,6 @@
-/** @format */
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import type { OpenEMRRequest } from "@shared/http.ts";
+import { actor } from "@module/auth/helper.ts";
 import type { Response } from "express";
 import LabService, {
  type CreateLabOrderInput,
@@ -9,10 +8,6 @@ import LabService, {
  type LabOrderListQuery,
  type LabResultListQuery,
 } from "@module/lab/lab.service.ts";
-
-function actor(req: { user: JwtPayload }) {
- return { userId: req.user.userId, role: req.user.role };
-}
 
 class LabController {
  listOrders = asyncHandler(

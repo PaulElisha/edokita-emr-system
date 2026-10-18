@@ -1,17 +1,4 @@
 #!/bin/sh
-# @format
-#
-# Idempotently ensure the deployed OpenEMR OAuth client is registered for the
-# scopes the E-Dokita lab API needs.
-#
-# OpenEMR silently drops requested scopes that are not in the client's
-# registered ceiling (oauth_clients.scope); the lab routes then fail with a
-# 401/"scope not in access token". The client itself is registered by hand in
-# the OpenEMR admin UI (see docs/OPENEMR.md), so this only reconciles its
-# scope list and is safe to run repeatedly.
-#
-# Runs as a one-shot compose service (profile "init"). The client row must
-# exist first, so it waits - bounded - for an admin to register it.
 set -eu
 
 host="${MYSQL_HOST:-mysql}"

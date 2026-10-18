@@ -1,4 +1,3 @@
-/** @format */
 import type { CreateDoctorInput } from "@module/doctor/doctor.service.ts";
 import { openemr } from "@module/openemr/client.ts";
 import type OpenEMRClient from "@module/openemr/client.ts";
@@ -12,15 +11,10 @@ import type { Result } from "@shared/types.ts";
 import type { FhirAppointment } from "@shared/types/fhir.ts";
 import { toError } from "@shared/error/error.ts";
 import { findUserPractitionerId } from "@module/user/helper.ts";
+import { listOpenEMRUsers } from "@module/openemr/helpers.ts";
 
 const CONNECTED_PATIENT_APPOINTMENT_FETCH = 500;
-interface UserProfileRecord {
- uuid?: string;
- specialty?: string | null;
- npi?: string | null;
-}
 
-/** Maps doctor input onto the FHIR `Practitioner` fields OpenEMR understands. */
 export function buildDoctorResource(
  input: CreateDoctorInput,
 ): Record<string, unknown> {
@@ -80,18 +74,13 @@ export function buildDoctorResource(
  return resource;
 }
 
-/**
- * OpenEMR's FHIR `Practitioner` neither reads nor writes `qualification`; the
- * provider specialty lives in `users.specialty` and is only exposed by the
- * Standard user API. Keyed by practitioner uuid.
- */
 export async function fetchPractitionerProfiles(): Promise<
  Map<string, MappedQualification>
 > {
- const profiles = new Map<string, MappedQualification>();
- try {
-  const users = await openemr.standardGet<UserProfileRecord>("/api/user");
-  for (const user of users) {
+  const profiles = new Map<string, MappedQualification>();
+  try {
+   const users = await listOpenEMRUsers(openemr);
+   for (const user of users) {
    if (!user.uuid) continue;
    const specialty = user.specialty?.trim() || undefined;
    const npi = user.npi?.trim() || undefined;

@@ -1,9 +1,7 @@
-/** @format */
 import { sql } from "drizzle-orm";
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { users } from "./user.ts";
 
-/** Opaque refresh tokens backing `/api/auth/refresh`. Stored hashed. */
 export const refreshTokens = pgTable("refresh_tokens", {
  id: uuid("id")
   .primaryKey()
@@ -20,7 +18,6 @@ export const refreshTokens = pgTable("refresh_tokens", {
   .defaultNow(),
 });
 
-/** Single-use password-reset tokens. Stored hashed. */
 export const passwordResetTokens = pgTable("password_reset_tokens", {
  id: uuid("id")
   .primaryKey()

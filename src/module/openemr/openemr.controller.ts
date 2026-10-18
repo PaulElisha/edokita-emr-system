@@ -1,27 +1,22 @@
-/** @format */
 import { Env } from "@/env.ts";
 import APIError from "@error/APIError.ts";
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import type { AuthRequest, OpenEMRRequest } from "@shared/http.ts";
+import { requireUserId } from "@module/auth/helper.ts";
 import OpenEMRService, {
  type CallbackQuery,
 } from "@module/openemr/openemr.service.ts";
 import type { Request, Response } from "express";
 
-function userId(req: { user: JwtPayload }): string {
- return req.user.userId;
-}
-
 class OpenEMRController {
  authorize = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const [data, err] = await OpenEMRService.startAuthorization(userId(req));
+  const [data, err] = await OpenEMRService.startAuthorization(requireUserId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });
 
  refresh = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const [data, err] = await OpenEMRService.refresh(userId(req));
+  const [data, err] = await OpenEMRService.refresh(requireUserId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });

@@ -1,4 +1,3 @@
-/** @format */
 import { z } from "zod";
 import { db } from "@db/db.ts";
 import { providerSchedules } from "@db/schema/appointment.ts";

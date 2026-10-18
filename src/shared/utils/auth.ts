@@ -1,5 +1,3 @@
-/** @format */
-
 import { getAccessToken } from "@shared/utils/openemr-auth.ts";
 
 async function main() {

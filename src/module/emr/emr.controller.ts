@@ -1,4 +1,3 @@
-/** @format */
 import asyncHandler from "@middleware/async-handler.ts";
 import type { OpenEMRRequest } from "@shared/http.ts";
 import type { Response } from "express";
@@ -22,10 +21,6 @@ import EmrService, {
  type SoapNoteInput,
 } from "@module/emr/emr.service.ts";
 
-/**
- * Records the acting clinician as the author of a freshly written record.
- * Best-effort: a missing id or failure never affects the write response.
- */
 const attribute = (
  patientId: string,
  type: EmrResourceType,

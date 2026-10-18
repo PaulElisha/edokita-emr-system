@@ -1,4 +1,3 @@
-/** @format */
 import type OpenEMRClient from "@module/openemr/client.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";

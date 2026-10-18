@@ -1,18 +1,5 @@
 <?php
 
-/**
- * LabService
- *
- * Read/write access to OpenEMR procedure orders and results exposed to the
- * E-Dokita backend over the standard API. OpenEMR ships read-only services for
- * these tables (ProcedureService, ObservationLabService); this service adds the
- * create paths modeled on interface/orders/orders_results.php and
- * interface/orders/receive_hl7_results.inc.php.
- *
- * @package   openemr
- * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
- */
-
 namespace OpenEMR\Services;
 
 use OpenEMR\Common\Database\QueryUtils;
@@ -21,12 +8,6 @@ use OpenEMR\Validators\ProcessingResult;
 
 class LabService
 {
-    /**
-     * Lists procedure orders, optionally scoped to a patient and/or order.
-     *
-     * @param array $search Supported keys: patient_id|pid, patient_uuid|puuid, order_id,
-     *                       order_uuid, status.
-     */
     public function getOrders(array $search): ProcessingResult
     {
         $result = new ProcessingResult();
@@ -81,13 +62,6 @@ class LabService
         return $result;
     }
 
-    /**
-     * Creates a procedure order (and its first order code).
-     *
-     * @param array $data patient_id|pid|patient_uuid|puuid, provider_id|provider_uuid,
-     *                    lab_id|lab_uuid, order_code, order_name, procedure_type,
-     *                    encounter_id, date_collected, order_priority, patient_instructions.
-     */
     public function createOrder(array $data): ProcessingResult
     {
         $result = new ProcessingResult();
@@ -191,11 +165,6 @@ class LabService
         return $result;
     }
 
-    /**
-     * Lists procedure results for an order and/or patient.
-     *
-     * @param array $search order_id|order_uuid, patient_id|pid|patient_uuid|puuid.
-     */
     public function getResults(array $search): ProcessingResult
     {
         $result = new ProcessingResult();
@@ -241,13 +210,6 @@ class LabService
         return $result;
     }
 
-    /**
-     * Records a lab report + one or more results against an existing order.
-     *
-     * @param array $data order_id|order_uuid, report_status, review_status, date_report,
-     *                    specimen_num, results[] each with result_code, result_text, result,
-     *                    units, range, abnormal, result_status, comments, date.
-     */
     public function createResult(array $data): ProcessingResult
     {
         $result = new ProcessingResult();
@@ -361,9 +323,6 @@ class LabService
         return $result;
     }
 
-    /**
-     * @return int|false|null numeric pid; false when an explicitly supplied patient is invalid.
-     */
     private function resolvePatientId(array $data)
     {
         $pid = $data['patient_id'] ?? $data['pid'] ?? null;

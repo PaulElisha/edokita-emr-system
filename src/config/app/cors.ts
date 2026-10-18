@@ -1,4 +1,3 @@
-/** @format */
 import Env from "@/env.ts";
 import cors from "cors";
 
@@ -6,7 +5,6 @@ function escapeRegex(value: string): string {
  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Split a comma-separated list, trimming and reducing each entry to its origin. */
 function parseOrigins(value: string): string[] {
  return value
   .split(",")
@@ -24,7 +22,6 @@ function parseOrigins(value: string): string[] {
 
 const allowedOrigins = parseOrigins(Env.CORS_ORIGIN);
 
-// `*` cannot be combined with credentialed requests, so reflect the caller instead.
 const allowAll = allowedOrigins.includes("*");
 
 const exactOrigins = allowedOrigins.filter((entry) => entry !== "*");

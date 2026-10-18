@@ -1,4 +1,3 @@
-/** @format */
 import { sql } from "drizzle-orm";
 import { pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { z } from "zod";

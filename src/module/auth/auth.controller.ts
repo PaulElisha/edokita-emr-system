@@ -1,4 +1,3 @@
-/** @format */
 import asyncHandler from "@middleware/async-handler.ts";
 import AuthService, {
  type ChangePasswordInput,

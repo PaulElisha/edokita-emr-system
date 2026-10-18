@@ -1,18 +1,13 @@
-/** @format */
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import UserService from "@module/user/user.service.ts";
 import type { UpdateUserInput } from "@module/user/helper.ts";
+import { requireUserId } from "@module/auth/helper.ts";
 import type { AuthRequest } from "@shared/http.ts";
 import type { Response } from "express";
 
-function toUserId(req: { user: JwtPayload }): string {
- return req.user.userId;
-}
-
 class UserController {
  profile = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const [data, err] = await UserService.profile(toUserId(req));
+  const [data, err] = await UserService.profile(requireUserId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });
@@ -22,7 +17,7 @@ class UserController {
    req: AuthRequest<unknown, unknown, UpdateUserInput>,
    res: Response,
   ) => {
-   const [data, err] = await UserService.update(toUserId(req), req.body);
+   const [data, err] = await UserService.update(requireUserId(req), req.body);
    if (err) throw err;
    res.json({ success: true, data });
   },

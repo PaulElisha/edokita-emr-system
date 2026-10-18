@@ -13,6 +13,7 @@ import EmrService, {
  type EmrClinicalItemParam,
  type EmrClinicalParam,
  type EmrEncounterParam,
+ type EmrObservationParam,
  type EmrPatientParam,
  type EmrSoapNoteParam,
  type EmrVitalItemParam,
@@ -72,6 +73,18 @@ class EmrController {
   if (err) throw err;
   res.json({ success: true, data });
  });
+
+ labObservation = asyncHandler(
+  async (req: OpenEMRRequest<EmrObservationParam>, res: Response) => {
+   const [data, err] = await EmrService.observation(
+    req.openemr,
+    req.params.patientId,
+    req.params.observationId,
+   );
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
 
  encounters = asyncHandler(
   async (req: OpenEMRRequest<EmrPatientParam>, res: Response) => {

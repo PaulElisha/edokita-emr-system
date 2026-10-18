@@ -12,6 +12,7 @@ import {
  buildMedicationPayload,
  buildVitalsPayload,
  findEmrAuthorsByPatient,
+ getObservation,
  searchClinical,
  searchObservations,
 } from "@module/emr/helper.ts";
@@ -151,6 +152,11 @@ export const emrVitalItemParamSchema = emrEncounterParamSchema.extend({
 });
 export type EmrVitalItemParam = z.infer<typeof emrVitalItemParamSchema>;
 
+export const emrObservationParamSchema = emrPatientParamSchema.extend({
+ observationId: z.string().min(1),
+});
+export type EmrObservationParam = z.infer<typeof emrObservationParamSchema>;
+
 export type StandardResource = Record<string, unknown>;
 
 export type SoapNote = StandardResource & {
@@ -169,12 +175,20 @@ export interface ObservationValue {
  unit?: string;
 }
 
+export interface ObservationReferenceRange {
+ low?: number;
+ high?: number;
+ unit?: string;
+ text?: string;
+}
+
 export interface ObservationItem {
  id?: string;
  code?: string;
  category: string[];
  effective?: string;
  value?: ObservationValue;
+ referenceRange?: ObservationReferenceRange[];
  components?: Array<{ code?: string; value?: ObservationValue }>;
  encounterId?: string;
  provider?: MappedProvider;
@@ -297,6 +311,13 @@ class EmrService {
   category: "vital-signs" | "laboratory",
  ): Promise<Result<ObservationResult>> =>
   searchObservations(client, patientId, category);
+
+ observation = (
+  client: OpenEMRClient,
+  patientId: string,
+  observationId: string,
+ ): Promise<Result<ObservationItem>> =>
+  getObservation(client, patientId, observationId);
 
  encounter = async (
   client: OpenEMRClient,

@@ -8,6 +8,7 @@ import {
  emrClinicalItemParamSchema,
  emrClinicalParamSchema,
  emrEncounterParamSchema,
+ emrObservationParamSchema,
  emrPatientParamSchema,
  emrSoapNoteParamSchema,
  emrVitalItemParamSchema,
@@ -52,6 +53,12 @@ class EmrRouter {
    requireRole("admin", "doctor", "patient"),
    validate(emrPatientParamSchema, "params"),
    EmrController.labs,
+  );
+  this.router.get(
+   "/:patientId/labs/:observationId",
+   requireRole("admin", "doctor", "patient"),
+   validate(emrObservationParamSchema, "params"),
+   EmrController.labObservation,
   );
   this.router.get(
    "/:patientId/encounters",

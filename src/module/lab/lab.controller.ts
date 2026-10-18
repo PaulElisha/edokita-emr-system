@@ -7,6 +7,7 @@ import LabService, {
  type CreateLabResultInput,
  type LabOrderListQuery,
  type LabResultListQuery,
+ type LabResultParam,
 } from "@module/lab/lab.service.ts";
 
 class LabController {
@@ -48,6 +49,18 @@ class LabController {
    const [data, err] = await LabService.listResults(
     req.openemr,
     req.query,
+    actor(req),
+   );
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
+
+ getResult = asyncHandler(
+  async (req: OpenEMRRequest<LabResultParam>, res: Response) => {
+   const [data, err] = await LabService.getResult(
+    req.openemr,
+    req.params.resultId,
     actor(req),
    );
    if (err) throw err;

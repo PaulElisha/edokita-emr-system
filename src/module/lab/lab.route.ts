@@ -7,6 +7,7 @@ import {
  labOrderListQuerySchema,
  labResultBodySchema,
  labResultListQuerySchema,
+ labResultParamSchema,
 } from "@module/lab/lab.service.ts";
 import { Router } from "express";
 
@@ -38,6 +39,12 @@ class LabRouter {
    requireRole("admin", "doctor", "lab", "patient"),
    validate(labResultListQuerySchema, "query"),
    LabController.listResults,
+  );
+  this.router.get(
+   "/results/:resultId",
+   requireRole("admin", "doctor", "lab", "patient"),
+   validate(labResultParamSchema, "params"),
+   LabController.getResult,
   );
   this.router.post(
    "/results",

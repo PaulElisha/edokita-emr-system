@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "@db/db.ts";
+import { withTransaction } from "@db/transaction.ts";
 import {
  conversationMessages,
  conversationThreads,
@@ -174,19 +175,22 @@ class MessagingService {
    if (terr || !loaded) return [null, terr];
    const { thread, actor } = loaded;
 
-   const [row] = await db
-    .insert(conversationMessages)
-    .values({ threadId: thread.id, senderId: userId, body: input.body })
-    .returning();
-   if (!row) return [null, toError("Failed to send message")];
-
-   await Promise.all([
-    db
+   let row: MessageRow | undefined;
+   await withTransaction(async (tx) => {
+    const [created] = await tx
+     .insert(conversationMessages)
+     .values({ threadId: thread.id, senderId: userId, body: input.body })
+     .returning();
+    if (!created) throw toError("Failed to send message");
+    await tx
      .update(conversationThreads)
      .set({ lastMessageAt: new Date() })
-     .where(eq(conversationThreads.id, thread.id)),
-    this.notifyRecipients(thread, actor),
-   ]);
+     .where(eq(conversationThreads.id, thread.id));
+    row = created;
+   });
+   if (!row) return [null, toError("Failed to send message")];
+
+   await this.notifyRecipients(thread, actor);
    return [row, null];
   } catch (e) {
    return [null, toError(e)];

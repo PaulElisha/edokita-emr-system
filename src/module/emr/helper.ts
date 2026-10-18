@@ -1,4 +1,3 @@
-/** @format */
 import { OpenEMR } from "@/env.ts";
 import {
  conceptText,
@@ -45,7 +44,6 @@ import {
 import { toError } from "@shared/error/error.ts";
 import { findUserNamesByPractitionerIds } from "@module/user/helper.ts";
 
-/** FHIR resource type backing each clinical kind. */
 const CLINICAL_RESOURCES: Record<ClinicalKind, string> = {
  conditions: "Condition",
  allergies: "AllergyIntolerance",
@@ -55,7 +53,6 @@ const CLINICAL_RESOURCES: Record<ClinicalKind, string> = {
  encounters: "Encounter",
 };
 
-/** The record types our API can attribute to a clinician. */
 export type EmrResourceType =
  | "encounter"
  | "condition"
@@ -65,7 +62,6 @@ export type EmrResourceType =
  | "lab_order"
  | "lab_result";
 
-/** Plural clinical kind -> singular attribution resource type. */
 const KIND_RESOURCE: Partial<Record<ClinicalKind, EmrResourceType>> = {
  conditions: "condition",
  allergies: "allergy",
@@ -73,7 +69,6 @@ const KIND_RESOURCE: Partial<Record<ClinicalKind, EmrResourceType>> = {
  encounters: "encounter",
 };
 
-/** Who posted a record and when (our own attribution, not OpenEMR's). */
 export interface EmrAttribution {
  provider: MappedProvider;
  authoredAt: string;
@@ -81,11 +76,6 @@ export interface EmrAttribution {
 
 export type EmrAuthorMap = Map<string, EmrAttribution>;
 
-/**
- * Records the clinician who posted an EMR record. OpenEMR stores no author for
- * problem-list items, vitals, or SOAP notes, so we keep it ourselves. Never
- * throws: attribution must not break the underlying write.
- */
 export async function recordEmrAuthor(
  patientId: string,
  resourceType: EmrResourceType,
@@ -102,11 +92,34 @@ export async function recordEmrAuthor(
  }
 }
 
-/**
- * Loads every author recorded for a patient, keyed by
- * `${resourceType}:${resourceId}`. Rows per patient are few, so one query with
- * in-memory indexing keeps reads simple.
- */
+export interface EmrAuthorEntry {
+ resourceType: EmrResourceType;
+ resourceId: string;
+}
+
+export async function recordEmrAuthors(
+ patientId: string,
+ authorUserId: string,
+ entries: EmrAuthorEntry[],
+): Promise<void> {
+ if (entries.length === 0) return;
+ try {
+  await db
+   .insert(emrRecordAuthors)
+   .values(
+    entries.map((e) => ({
+     patientId,
+     resourceType: e.resourceType,
+     resourceId: e.resourceId,
+     authorUserId,
+    })),
+   )
+   .onConflictDoNothing();
+ } catch {
+  // best-effort only
+ }
+}
+
 export async function findEmrAuthorsByPatient(
  patientId: string,
 ): Promise<EmrAuthorMap> {
@@ -140,7 +153,6 @@ export async function findEmrAuthorsByPatient(
  return authors;
 }
 
-/** Attaches our recorded author (and timestamp) to a set of clinical items. */
 function applyClinicalAuthors(
  items: ClinicalItem[],
  type: EmrResourceType,
@@ -200,7 +212,6 @@ export async function searchClinical(
  }
 }
 
-/** Normalizes any FHIR value slot into the `{ value, unit }` shape our API exposes. */
 function toValue(
  quantity?: FhirQuantity,
  text?: string,
@@ -214,7 +225,6 @@ function toValue(
  return undefined;
 }
 
-/** Reads a top-level Observation value (vitals/labs use `valueQuantity`). */
 function observationValue(o: FhirObservation): ObservationValue | undefined {
  const quantity = toValue(o.valueQuantity);
  if (quantity) return quantity;
@@ -228,11 +238,6 @@ function observationValue(o: FhirObservation): ObservationValue | undefined {
  return undefined;
 }
 
-/**
- * OpenEMR emits vitals in imperial UCUM units (`form_vitals` storage format).
- * Convert the display value back to metric so reads round-trip with the metric
- * inputs our write API/MCP tools accept.
- */
 function toMetric(value: ObservationValue): ObservationValue {
  const v = value.value;
  if (typeof v !== "number") return value;
@@ -323,10 +328,6 @@ function num(value: string | number | undefined): number | undefined {
  return Number.isFinite(n) ? n : undefined;
 }
 
-/**
- * OpenEMR's BMI category lower bounds (`BmiCategory::fromBmi`); the matched
- * string is stored verbatim in `form_vitals.BMI_status`.
- */
 const BMI_CATEGORIES: Array<{ min: number; status: string }> = [
  { min: 42, status: "Obesity III" },
  { min: 34, status: "Obesity II" },
@@ -337,16 +338,10 @@ const BMI_CATEGORIES: Array<{ min: number; status: string }> = [
  { min: 10, status: "Underweight" },
 ];
 
-/** Maps a BMI value to the OpenEMR `BMI_status` label. */
 function bmiStatus(bmi: number): string | undefined {
  return BMI_CATEGORIES.find((c) => bmi > c.min)?.status;
 }
 
-/**
- * Writes are issued through OpenEMR's Standard REST API (FHIR Encounter/Observation
- * are read-only). Payloads use OpenEMR's own field names: `pc_*` / `form_encounter`
- * columns for encounters, `form_vitals` columns for vitals.
- */
 export function buildEncounterPayload(
  input: CreateEncounterInput,
 ): Record<string, unknown> {
@@ -366,10 +361,6 @@ export function buildEncounterPayload(
  };
 }
 
-/**
- * Our API takes metric inputs; OpenEMR's `form_vitals` stores imperial
- * (weight lb, height in, temperature °F), so conversions live here.
- */
 export function buildVitalsPayload(
  input: RecordVitalsInput,
 ): Record<string, unknown> {
@@ -397,8 +388,6 @@ export function buildVitalsPayload(
    ? round(convert(heightCm).from("cm").to("in"), 2)
    : undefined;
  set("height", heightIn);
- // OpenEMR's UI computes BMI client-side (703 * lb / in²) and only then stores
- // it; the REST vital insert skips that, so replicate it here.
  if (weightLb !== undefined && heightIn !== undefined && heightIn > 0) {
   const bmi = round((weightLb / (heightIn * heightIn)) * 703, 2);
   payload.BMI = bmi;
@@ -430,10 +419,6 @@ export function buildVitalsPayload(
  return payload;
 }
 
-/**
- * Problem-list / allergy writes go through OpenEMR's Standard API, whose payload
- * fields (`begdate`/`enddate`) differ from our camelCase API.
- */
 export function buildConditionPayload(
  input: ConditionInput,
 ): Record<string, unknown> {
@@ -454,10 +439,6 @@ export function buildAllergyPayload(
  };
 }
 
-/**
- * The medication list reuses the generic `lists` table; OpenEMR's controller
- * injects `pid`/`type`, so only the clinical fields are sent here.
- */
 export function buildMedicationPayload(
  input: MedicationInput,
 ): Record<string, unknown> {

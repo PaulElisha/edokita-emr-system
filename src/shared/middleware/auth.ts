@@ -1,4 +1,3 @@
-/** @format */
 import OpenEMRClient, { openemr } from "@module/openemr/client.ts";
 import APIError from "@error/APIError.ts";
 import AppError from "@error/app-error.ts";
@@ -19,8 +18,6 @@ export const authenticate = async (
   return next(APIError.unauthorized());
  }
  try {
-  // Full verification (signature, issuer, audience, expiry, required claims):
-  // any failure is an auth problem, not a server fault.
   const payload = await verifyAppToken(token);
   if (!payload.userId) {
    return next(APIError.unauthorized("Invalid session token"));
@@ -29,8 +26,6 @@ export const authenticate = async (
   if (err || !user) {
    return next(APIError.unauthorized("Invalid session token"));
   }
-  // Instant revocation: a token minted before the latest logout/password
-  // change carries a stale epoch and is rejected without any extra query.
   if ((payload.sessionEpoch ?? 0) !== user.sessionEpoch) {
    return next(APIError.unauthorized("Session no longer valid"));
   }
@@ -45,14 +40,6 @@ export const authenticate = async (
  }
 };
 
-/**
- * Attaches an OpenEMR client to the request.
- *
- * Staff (doctor/admin) get a client bound to their own per-user OAuth tokens
- * (auto-refreshing). Patients cannot mint a patient-context token through the
- * provider login flow, so they share the service-account client; ownership is
- * enforced downstream in app code.
- */
 export const withOpenEMR = async (
  req: Request,
  _res: Response,

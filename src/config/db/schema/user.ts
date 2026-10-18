@@ -1,5 +1,3 @@
-/** @format */
-
 import { sql } from "drizzle-orm";
 import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { roles } from "./role.ts";

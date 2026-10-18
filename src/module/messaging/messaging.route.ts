@@ -1,4 +1,3 @@
-/** @format */
 import { authenticate } from "@middleware/auth.ts";
 import validate from "@middleware/validation.ts";
 import MessagingController from "@module/messaging/messaging.controller.ts";

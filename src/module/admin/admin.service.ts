@@ -1,6 +1,6 @@
-/** @format */
 import type OpenEMRClient from "@module/openemr/client.ts";
 import { countResources } from "@module/admin/helper.ts";
+import { listOpenEMRUsers } from "@module/openemr/helpers.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 
@@ -64,14 +64,14 @@ class AdminService {
   ];
  };
 
- users = async (client: OpenEMRClient): Promise<Result<AdminUser[]>> => {
-  try {
-   const users = await client.standardGet<AdminUser>("/api/user");
-   return [users, null];
-  } catch (e) {
-   return [null, toError(e)];
-  }
- };
+  users = async (client: OpenEMRClient): Promise<Result<AdminUser[]>> => {
+   try {
+    const users = await listOpenEMRUsers(client);
+    return [users as unknown as AdminUser[], null];
+   } catch (e) {
+    return [null, toError(e, "listOpenEMRUsers")];
+   }
+  };
 
  facilities = async (
   client: OpenEMRClient,

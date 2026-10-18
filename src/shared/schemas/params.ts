@@ -1,4 +1,3 @@
-/** @format */
 import { z } from "zod";
 
 export const idParamSchema = z.object({

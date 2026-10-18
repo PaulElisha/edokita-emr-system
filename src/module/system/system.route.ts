@@ -1,4 +1,3 @@
-/** @format */
 import SystemController from "@module/system/system.controller.ts";
 import { Router } from "express";
 

@@ -1,18 +1,13 @@
-/** @format */
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import type { IdParam } from "@shared/schemas/params.ts";
 import type { AuthRequest } from "@shared/http.ts";
 import type { Response } from "express";
+import { requireUserId } from "@module/auth/helper.ts";
 import MessagingService, {
  type CreateThreadInput,
  type SendMessageInput,
  type ThreadListQuery,
 } from "@module/messaging/messaging.service.ts";
-
-function userId(req: { user: JwtPayload }): string {
- return req.user.userId;
-}
 
 class MessagingController {
  listThreads = asyncHandler(
@@ -22,7 +17,7 @@ class MessagingController {
   ) => {
    const [data, err] = await MessagingService.listThreads(
     req.query,
-    userId(req),
+    requireUserId(req),
    );
    if (err) throw err;
    res.json({ success: true, data });
@@ -36,7 +31,7 @@ class MessagingController {
   ) => {
    const [data, err] = await MessagingService.createThread(
     req.body,
-    userId(req),
+    requireUserId(req),
    );
    if (err) throw err;
    res.status(201).json({ success: true, data });
@@ -50,7 +45,7 @@ class MessagingController {
   ) => {
    const [data, err] = await MessagingService.listMessages(
     req.params.id,
-    userId(req),
+    requireUserId(req),
     req.query,
    );
    if (err) throw err;
@@ -66,7 +61,7 @@ class MessagingController {
    const [data, err] = await MessagingService.send(
     req.params.id,
     req.body,
-    userId(req),
+    requireUserId(req),
    );
    if (err) throw err;
    res.status(201).json({ success: true, data });
@@ -77,7 +72,7 @@ class MessagingController {
   async (req: AuthRequest<IdParam>, res: Response) => {
    const [data, err] = await MessagingService.markRead(
     req.params.id,
-    userId(req),
+    requireUserId(req),
    );
    if (err) throw err;
    res.json({ success: true, data });

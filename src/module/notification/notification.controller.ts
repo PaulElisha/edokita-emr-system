@@ -1,16 +1,11 @@
-/** @format */
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import type { IdParam } from "@shared/schemas/params.ts";
 import type { AuthRequest } from "@shared/http.ts";
+import { requireUserId } from "@module/auth/helper.ts";
 import type { Response } from "express";
 import NotificationService, {
  type NotificationQuery,
 } from "@module/notification/notification.service.ts";
-
-function userId(req: { user: JwtPayload }): string {
- return req.user.userId;
-}
 
 class NotificationController {
  list = asyncHandler(
@@ -18,7 +13,7 @@ class NotificationController {
    req: AuthRequest<unknown, unknown, unknown, NotificationQuery>,
    res: Response,
   ) => {
-   const [data, err] = await NotificationService.list(userId(req), req.query);
+   const [data, err] = await NotificationService.list(requireUserId(req), req.query);
    if (err) throw err;
    res.json({ success: true, data });
   },
@@ -26,7 +21,7 @@ class NotificationController {
 
  markRead = asyncHandler(async (req: AuthRequest<IdParam>, res: Response) => {
   const [data, err] = await NotificationService.markRead(
-   userId(req),
+   requireUserId(req),
    req.params.id,
   );
   if (err) throw err;
@@ -34,7 +29,7 @@ class NotificationController {
  });
 
  markAllRead = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const [data, err] = await NotificationService.markAllRead(userId(req));
+  const [data, err] = await NotificationService.markAllRead(requireUserId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });

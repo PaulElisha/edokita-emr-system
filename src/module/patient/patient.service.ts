@@ -1,4 +1,3 @@
-/** @format */
 import {
  calcAge,
  mapPatient,
@@ -49,7 +48,7 @@ class PatientService {
  ): Promise<Result<PatientListResult>> => {
   try {
    const params: Record<string, QueryValue> = {
-    _count: query._count ?? 100,
+    _count: query._count,
    };
    if (query.family) params.family = query.family;
    if (query.given) params.given = query.given;

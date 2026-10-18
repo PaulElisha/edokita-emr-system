@@ -1,5 +1,3 @@
-/** @format */
-
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 
 export type AsyncHandler<R extends Request = Request> = (

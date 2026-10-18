@@ -1,30 +1,4 @@
 #!/usr/bin/env bash
-# @format
-#
-# Regenerate the OpenEMR core-file patches from the pinned base image.
-#
-# The extension layers two things onto the stock OpenEMR image:
-#   1. NEW files (services/controllers OpenEMR does not ship) - copied as-is.
-#   2. PATCHES applied to upstream CORE files at build time.
-#
-# Keeping the patches (rather than frozen copies of whole core files) means an
-# OpenEMR version bump is a re-apply, not a manual 3-way merge. This script is
-# the maintenance tool for that:
-#
-#   * default        - extract pristine core files from the base image, re-apply
-#                      the current patches onto a copy, and rewrite the patches
-#                      as pristine -> patched. Run this after bumping the pinned
-#                      digest so the patch headers stay aligned with upstream.
-#   * --regen-only   - skip extraction/apply and just re-diff the existing
-#                      .work/ tree (use after resolving conflicts by hand).
-#
-# Upgrade workflow:
-#   1. Bump the digest in Dockerfile.
-#   2. Run: openemr/regenerate-patches.sh
-#   3. If a hunk fails, edit the files under openemr/.work/patched/ to resolve,
-#      then run: openemr/regenerate-patches.sh --regen-only
-#   4. Rebuild: docker compose build openemr
-#
 set -euo pipefail
 
 overlay="$(cd "$(dirname "$0")" && pwd)"
@@ -32,7 +6,6 @@ repo_root="$(cd "$overlay/.." && pwd)"
 dockerfile="$repo_root/Dockerfile"
 work="$overlay/.work"
 
-# Patch file -> core file it targets (both relative to the OpenEMR web root).
 patch_targets=(
   "0001-add-lab-standard-routes.patch:apis/routes/_rest_routes_standard.inc.php"
   "0002-register-lab-scopes.patch:src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php"

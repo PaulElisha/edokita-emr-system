@@ -1,4 +1,3 @@
-/** @format */
 import { db } from "@db/db.ts";
 import { notifications } from "@db/schema/messaging.ts";
 import logger from "@app/logger.ts";
@@ -6,6 +5,7 @@ import APIError from "@error/APIError.ts";
 import { countParam } from "@shared/schemas/common.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
+import { unique } from "@shared/utils/array.ts";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
@@ -20,14 +20,10 @@ export interface NotifyInput {
 
 export const notificationQuerySchema = z.object({
  unread: z.enum(["true", "false"]).optional(),
- _count: countParam,
+ _count: countParam.default(50),
 });
 export type NotificationQuery = z.infer<typeof notificationQuerySchema>;
 
-/**
- * Best-effort notification creation. Never throws — a failed notification must
- * not fail the originating request.
- */
 export async function notify(
  userId: string | null | undefined,
  input: NotifyInput,
@@ -46,6 +42,30 @@ export async function notify(
  }
 }
 
+export async function notifyMany(
+ userIds: Array<string | null | undefined>,
+ input: NotifyInput,
+): Promise<void> {
+ const recipients = unique(userIds);
+ if (recipients.length === 0) return;
+ try {
+  await db.insert(notifications).values(
+   recipients.map((userId) => ({
+    userId,
+    type: input.type,
+    title: input.title,
+    body: input.body,
+    data: input.data,
+   })),
+  );
+ } catch (e) {
+  logger.warn(
+   { err: e, count: recipients.length, type: input.type },
+   "Failed to create notifications",
+  );
+ }
+}
+
 class NotificationService {
  list = async (
  userId: string,
@@ -61,7 +81,7 @@ class NotificationService {
     .from(notifications)
     .where(where)
     .orderBy(desc(notifications.createdAt))
-    .limit(Number(query._count ?? 50));
+    .limit(query._count);
    return [{ total: rows.length, items: rows }, null];
   } catch (e) {
    return [null, toError(e)];

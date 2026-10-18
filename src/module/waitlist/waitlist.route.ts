@@ -1,4 +1,3 @@
-/** @format */
 import { authenticate } from "@middleware/auth.ts";
 import { requireRole } from "@middleware/role-guard.ts";
 import validate from "@middleware/validation.ts";

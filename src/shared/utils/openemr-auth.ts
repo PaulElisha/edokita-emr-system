@@ -1,4 +1,3 @@
-/** @format */
 import { OpenEMR } from "@/env.ts";
 import { decodeJwtPayload } from "@auth/jwt.ts";
 import {
@@ -16,7 +15,6 @@ import {
 export const OPENEMR_SCOPE =
  "openid api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Practitioner.write user/Appointment.read user/ValueSet.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus";
 
-/** Refresh this long before the token actually expires. */
 const SKEW_MS = 60_000;
 const TOKEN_KEY = "openemr:service-access-token";
 
@@ -25,10 +23,8 @@ function decodeExpiry(token: string): number | null {
  return typeof json?.exp === "number" ? json.exp * 1000 : null;
 }
 
-/** Absolute expiry (epoch ms) of the remembered token; `0` means "not known yet". */
 let expiresAt = 0;
 
-// Seed the cache from OPENEMR_ACCESS_TOKEN when it is still valid.
 {
  forget(TOKEN_KEY);
  const token = OpenEMR.accessToken;
@@ -64,13 +60,6 @@ async function mint(): Promise<string> {
  return data.access_token;
 }
 
-/**
- * Returns a valid access token, minting a new one when the remembered token is
- * missing/expired. Pass `force` to bypass the cache (e.g. after a 401).
- *
- * `remember` also de-duplicates concurrent mints: the in-flight promise is the
- * remembered value, so parallel callers await a single token request.
- */
 export function getAccessToken(force = false): Promise<string> {
  if (force || (expiresAt !== 0 && Date.now() >= expiresAt)) forget(TOKEN_KEY);
  return remember(TOKEN_KEY, mint).catch((e) => {
@@ -84,4 +73,3 @@ export function invalidateAccessToken(): void {
  forget(TOKEN_KEY);
  expiresAt = 0;
 }
-

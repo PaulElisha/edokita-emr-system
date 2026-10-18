@@ -1,4 +1,3 @@
-/** @format */
 import { z } from "zod";
 import {
  type MappedClinical,
@@ -50,36 +49,57 @@ export const emrEncounterParamSchema = emrPatientParamSchema.extend({
 });
 export type EmrEncounterParam = z.infer<typeof emrEncounterParamSchema>;
 
-export const encounterBodySchema = z.object({
- date: z.string().optional(),
- reason: z.string().optional(),
- categoryId: z.string().optional(),
- facilityId: z.string().optional(),
- billingFacility: z.string().optional(),
- providerId: z.string().optional(),
- classCode: z.string().optional(),
- sensitivity: z.string().optional(),
-});
+export const encounterBodySchema = z
+ .object({
+  date: z.string().optional(),
+  reason: z.string().optional(),
+  categoryId: z.string().optional(),
+  facilityId: z.string().optional(),
+  billingFacility: z.string().optional(),
+  providerId: z.string().optional(),
+  classCode: z.string().optional(),
+  sensitivity: z.string().optional(),
+ })
+ .refine((v) => Object.values(v).some((x) => x !== undefined), {
+  message: "At least one field must be provided",
+ });
 export type CreateEncounterInput = z.infer<typeof encounterBodySchema>;
 
-export const vitalsBodySchema = z.object({
- date: z.string().optional(),
- systolic: z.coerce.number().optional(),
- diastolic: z.coerce.number().optional(),
- weightKg: z.coerce.number().positive().optional(),
- heightCm: z.coerce.number().positive().optional(),
- temperatureC: z.coerce.number().optional(),
- temperatureMethod: z.string().optional(),
- pulse: z.coerce.number().optional(),
- respiration: z.coerce.number().optional(),
- oxygenSaturation: z.coerce.number().optional(),
- waistCircumference: z.coerce.number().positive().optional(),
- headCircumference: z.coerce.number().positive().optional(),
- note: z.string().optional(),
-});
+const vitalMeasurementKeys = [
+ "systolic",
+ "diastolic",
+ "weightKg",
+ "heightCm",
+ "temperatureC",
+ "pulse",
+ "respiration",
+ "oxygenSaturation",
+ "waistCircumference",
+ "headCircumference",
+] as const;
+
+export const vitalsBodySchema = z
+ .object({
+  date: z.string().optional(),
+  systolic: z.coerce.number().optional(),
+  diastolic: z.coerce.number().optional(),
+  weightKg: z.coerce.number().positive().optional(),
+  heightCm: z.coerce.number().positive().optional(),
+  temperatureC: z.coerce.number().optional(),
+  temperatureMethod: z.string().optional(),
+  pulse: z.coerce.number().optional(),
+  respiration: z.coerce.number().optional(),
+  oxygenSaturation: z.coerce.number().optional(),
+  waistCircumference: z.coerce.number().positive().optional(),
+  headCircumference: z.coerce.number().positive().optional(),
+  note: z.string().optional(),
+ })
+ .refine(
+  (v) => vitalMeasurementKeys.some((key) => v[key] !== undefined),
+  { message: "At least one vital measurement is required" },
+ );
 export type RecordVitalsInput = z.infer<typeof vitalsBodySchema>;
 
-/** OpenEMR problem-list / allergy codes are `<codetype>:<code>` (e.g. `ICD10:H02.839`). */
 const diagnosisSchema = z
  .string()
  .regex(/^[A-Za-z0-9_-]+:.+$/, "Expected `<codetype>:<code>`");
@@ -116,7 +136,6 @@ export const soapNoteBodySchema = z.object({
 });
 export type SoapNoteInput = z.infer<typeof soapNoteBodySchema>;
 
-/** Param schema for a nested clinical record (condition/allergy/medication id). */
 export const emrClinicalItemParamSchema = emrPatientParamSchema.extend({
  itemId: z.string().min(1),
 });
@@ -134,7 +153,6 @@ export type EmrVitalItemParam = z.infer<typeof emrVitalItemParamSchema>;
 
 export type StandardResource = Record<string, unknown>;
 
-/** A SOAP note with our recorded author attached on read. */
 export type SoapNote = StandardResource & {
  provider?: MappedProvider;
  authoredAt?: string;
@@ -159,14 +177,12 @@ export interface ObservationItem {
  value?: ObservationValue;
  components?: Array<{ code?: string; value?: ObservationValue }>;
  encounterId?: string;
- /** Clinician who recorded this observation (resolved via its encounter). */
  provider?: MappedProvider;
  authoredAt?: string;
 }
 
 export type ObservationResult = ListResult<ObservationItem>;
 
-/** Who last attended the patient and when (derived from encounters). */
 export interface LastAttended {
  encounterId?: string;
  date?: string;
@@ -187,7 +203,6 @@ export interface ClinicalSummary {
  lastAttended?: LastAttended;
 }
 
-/** The encounter with the latest clinical date (drives "last attended"). */
 function latestEncounter(items: ClinicalItem[]): MappedEncounter | undefined {
  let latest: MappedEncounter | undefined;
  for (const item of items) {
@@ -196,7 +211,6 @@ function latestEncounter(items: ClinicalItem[]): MappedEncounter | undefined {
    latest = item;
    continue;
   }
-  // Encounter dates are day-level; break ties by when we recorded them.
   if (
    item.start === latest.start &&
    (item.authoredAt ?? "") > (latest.authoredAt ?? "")
@@ -290,9 +304,6 @@ class EmrService {
   encounterId: string,
  ): Promise<Result<FhirEncounter>> => {
   try {
-   // OpenEMR denies a bare FHIR `Encounter/{id}` read ("Organization policy
-   // does not have permit access resource"); a patient-scoped search is
-   // allowed, so resolve the encounter that way.
    const bundle = await client.fhirSearch("Encounter", {
     patient: patientId,
     _id: encounterId,
@@ -330,11 +341,13 @@ class EmrService {
   input: RecordVitalsInput,
  ): Promise<Result<StandardResource>> => {
   try {
-   const [pid, pe] = await resolvePatientPid(client, patientId);
+   const [[pid, pe], [eid, ee]] = await Promise.all([
+    resolvePatientPid(client, patientId),
+    resolveEncounterEid(client, patientId, encounterId),
+   ]);
    if (pe || !pid) {
     return [null, pe];
    }
-   const [eid, ee] = await resolveEncounterEid(client, patientId, encounterId);
    if (ee || !eid) return [null, ee];
    const created = await client.standardPost<StandardResource>(
     `/api/patient/${pid}/encounter/${eid}/vital`,
@@ -354,11 +367,13 @@ class EmrService {
   input: RecordVitalsInput,
  ): Promise<Result<StandardResource>> => {
   try {
-   const [pid, pe] = await resolvePatientPid(client, patientId);
+   const [[pid, pe], [eid, ee]] = await Promise.all([
+    resolvePatientPid(client, patientId),
+    resolveEncounterEid(client, patientId, encounterId),
+   ]);
    if (pe || !pid) {
     return [null, pe];
    }
-   const [eid, ee] = await resolveEncounterEid(client, patientId, encounterId);
    if (ee || !eid) return [null, ee];
    const updated = await client.standardPut<StandardResource>(
     `/api/patient/${pid}/encounter/${eid}/vital/${vitalId}`,
@@ -457,8 +472,6 @@ class EmrService {
   );
   if (err) return [null, err];
   const record = created ?? {};
-  // OpenEMR's create returns only the numeric list id; resolve the uuid our
-  // reads (and attribution) key on.
   if (record.id !== undefined) {
    const uuid = await this.findMedicationUuid(client, pid, record.id);
    if (uuid) return [{ ...record, uuid }, null];
@@ -585,16 +598,12 @@ class EmrService {
   }
  };
 
- /** Resolves a medication's uuid from its numeric OpenEMR list id. */
  private findMedicationUuid = async (
   client: OpenEMRClient,
   pid: string,
   listId: unknown,
  ): Promise<string | undefined> => {
   try {
-   // OpenEMR assigns `lists.uuid` lazily: any PatientIssues-service read
-   // backfills missing uuids. Touch medical_problem to force it, otherwise the
-   // medication list endpoint fails on the still-null uuid.
    await client.standardGet(`/api/patient/${pid}/medical_problem`);
    const meds = await client.standardGet<StandardResource>(
     `/api/patient/${pid}/medication`,
@@ -606,7 +615,6 @@ class EmrService {
   }
  };
 
- /** Runs a Standard write and normalizes the first unwrapped record. */
  private writeStandard = async (
   client: OpenEMRClient,
   method: "POST" | "PUT" | "DELETE",

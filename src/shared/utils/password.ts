@@ -1,4 +1,3 @@
-/** @format */
 import { hash, type Options, verify } from "@node-rs/argon2";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";

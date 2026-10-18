@@ -1,4 +1,3 @@
-/** @format */
 import { sql } from "drizzle-orm";
 import {
  index,
@@ -10,16 +9,10 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./user.ts";
 
-/**
- * Local overlay for OpenEMR appointments. OpenEMR's Standard API can create and
- * delete appointments but has no update/status endpoint, so status changes and
- * reschedules are stored here and merged on read (history stays in OpenEMR).
- */
 export const appointmentOverrides = pgTable("appointment_overrides", {
  id: uuid("id")
   .primaryKey()
   .default(sql`gen_random_uuid()`),
- /** FHIR Appointment id (== OpenEMR `pc_uuid`). */
  appointmentUuid: text("appointment_uuid").notNull().unique(),
  status: text("status"),
  start: timestamp("start", { withTimezone: true }),
@@ -36,10 +29,6 @@ export const appointmentOverrides = pgTable("appointment_overrides", {
   .defaultNow(),
 });
 
-/**
- * Per-provider working hours driving slot search. `practitionerId` is the
- * OpenEMR practitioner uuid; `weekday` is 0 (Sunday) – 6 (Saturday).
- */
 export const providerSchedules = pgTable(
  "provider_schedules",
  {
@@ -59,7 +48,6 @@ export const providerSchedules = pgTable(
  (t) => [index("provider_schedules_practitioner_idx").on(t.practitionerId)],
 );
 
-/** Local waitlist entries for patients wanting an earlier appointment. */
 export const appointmentWaitlist = pgTable("appointment_waitlist", {
  id: uuid("id")
   .primaryKey()

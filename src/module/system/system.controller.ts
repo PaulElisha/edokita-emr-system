@@ -1,4 +1,3 @@
-/** @format */
 import asyncHandler from "@middleware/async-handler.ts";
 import type { Request, Response } from "express";
 import SystemService from "@module/system/system.service.ts";

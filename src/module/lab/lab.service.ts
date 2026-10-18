@@ -1,14 +1,15 @@
-/** @format */
 import { z } from "zod";
 import type OpenEMRClient from "@module/openemr/client.ts";
-import { resolvePatientPid } from "@module/patient/helper.ts";
-import { roleSchema } from "@db/schema/role.ts";
 import {
- findUserById,
+ resolvePatientPid,
+ resolveOwnPatientId,
+} from "@module/patient/helper.ts";
+import type { RequestActor } from "@module/auth/helper.ts";
+import {
  findUserByPatientId,
  findUserByPractitionerId,
 } from "@module/user/helper.ts";
-import { recordEmrAuthor } from "@module/emr/helper.ts";
+import { recordEmrAuthor, recordEmrAuthors } from "@module/emr/helper.ts";
 import { notify } from "@module/notification/notification.service.ts";
 import APIError from "@error/APIError.ts";
 import type { ListResult, Result } from "@shared/types.ts";
@@ -20,10 +21,7 @@ export type LabRecord = Record<string, unknown>;
 const asString = (v: unknown): string | undefined =>
  typeof v === "string" && v ? v : undefined;
 
-export interface LabActor {
- role: z.infer<typeof roleSchema>;
- userId: string;
-}
+export type LabActor = RequestActor;
 
 export const labOrderListQuerySchema = z.object({
  patientId: z.string().optional(),
@@ -83,7 +81,7 @@ class LabService {
   try {
    const params: Record<string, string | number> = {};
    if (actor.role === "patient") {
-    const [ownId, perr] = await this.resolveOwnPatient(actor);
+    const [ownId, perr] = await resolveOwnPatientId(actor.userId);
     if (perr || !ownId) return [null, perr];
     const [pid, rperr] = await resolvePatientPid(client, ownId);
     if (rperr || !pid) return [null, rperr];
@@ -146,7 +144,7 @@ class LabService {
    const params: Record<string, string | number> = {};
    if (query.orderId) params.order_id = query.orderId;
    if (actor.role === "patient") {
-    const [ownId, perr] = await this.resolveOwnPatient(actor);
+    const [ownId, perr] = await resolveOwnPatientId(actor.userId);
     if (perr || !ownId) return [null, perr];
     const [pid, rperr] = await resolvePatientPid(client, ownId);
     if (rperr || !pid) return [null, rperr];
@@ -199,21 +197,28 @@ class LabService {
    const report = created ?? {};
    const patientUuid = asString(report.patient_uuid);
    const results = Array.isArray(report.results) ? report.results : [];
+
    if (patientUuid) {
-    for (const r of results) {
-     const resultUuid = asString((r as LabRecord).result_uuid);
-     if (resultUuid) {
-      await recordEmrAuthor(patientUuid, "lab_result", resultUuid, actor.userId);
-     }
-    }
+    await recordEmrAuthors(
+     patientUuid,
+     actor.userId,
+     results
+      .map((r) => asString((r as LabRecord).result_uuid))
+      .filter((id): id is string => Boolean(id))
+      .map((resourceId) => ({
+       resourceType: "lab_result" as const,
+       resourceId,
+      })),
+    );
    }
 
-   // Notify the ordering clinician that results are available.
    const providerUuid = asString(report.provider_uuid);
    if (providerUuid && patientUuid) {
-    const [doctor] = await findUserByPractitionerId(providerUuid);
+    const [[doctor], [patient]] = await Promise.all([
+     findUserByPractitionerId(providerUuid),
+     findUserByPatientId(patientUuid),
+    ]);
     if (doctor) {
-     const [patient] = await findUserByPatientId(patientUuid);
      const who = patient
       ? `${patient.firstName ?? ""} ${patient.lastName ?? ""}`.trim()
       : "a patient";
@@ -229,22 +234,6 @@ class LabService {
   } catch (e) {
    return [null, toError(e)];
   }
- };
-
- /** Resolves the patient uuid linked to the requesting patient account. */
- private resolveOwnPatient = async (actor: LabActor): Promise<Result<string>> => {
-  const [user, err] = await findUserById(actor.userId);
-  if (err || !user) return [null, err];
-  const patientId = user.openemr.patientId;
-  if (!patientId) {
-   return [
-    null,
-    APIError.badRequest(
-     "Your account is not linked to an OpenEMR patient record",
-    ),
-   ];
-  }
-  return [patientId, null];
  };
 }
 

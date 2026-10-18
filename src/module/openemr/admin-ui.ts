@@ -1,4 +1,3 @@
-/** @format */
 import { OpenEMR } from "@/env.ts";
 import APIError from "@error/APIError.ts";
 import type { Result } from "@shared/types.ts";
@@ -21,7 +20,6 @@ function extractCsrf(html: string): string | null {
  return m2 ? m2[1] : null;
 }
 
-/** Opens an OpenEMR admin web session and returns the session cookie. */
 async function loginAsAdmin(): Promise<Result<string>> {
  const res = await fetch(
   `${BASE}/interface/main/main_screen.php?auth=login&site=default`,
@@ -61,7 +59,6 @@ async function loginAsAdmin(): Promise<Result<string>> {
  return [cookie, null];
 }
 
-/** Fetches a CSRF token for OpenEMR's usergroup forms. */
 async function fetchCsrf(cookie: string): Promise<Result<string>> {
  const res = await fetch(
   `${BASE}/interface/usergroup/usergroup_admin_add.php`,
@@ -79,11 +76,6 @@ async function fetchCsrf(cookie: string): Promise<Result<string>> {
  return [csrf, null];
 }
 
-/**
- * Creates an OpenEMR user with a real login (users_secure) and ACL group via the
- * Users admin. Unlike the FHIR Practitioner create, this guarantees the doctor
- * can authenticate (required for password-grant auto-connect).
- */
 export async function createOpenEMRLogin(params: {
  username: string;
  password: string;
@@ -142,11 +134,6 @@ export async function createOpenEMRLogin(params: {
  }
 }
 
-/**
- * Sets an existing OpenEMR user's password and ACL group. OpenEMR's `mode=update`
- * handler always rewrites authorized/active/see_auth and the ARO mapping from the
- * POST body, so current values must be re-supplied to avoid clobbering them.
- */
 export async function setOpenEMRUserAccount(params: {
  id: number;
  newPassword: string;

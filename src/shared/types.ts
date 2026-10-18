@@ -1,5 +1,3 @@
-/** @format */
-
 export interface APIResponse<T> {
  status: "ok";
  message?: string;

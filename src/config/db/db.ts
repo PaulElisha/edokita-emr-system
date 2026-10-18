@@ -1,4 +1,3 @@
-/** @format */
 import { Env, isProd } from "@/env.ts";
 import schema from "@db/schema.ts";
 import { remember } from "@epic-web/remember";

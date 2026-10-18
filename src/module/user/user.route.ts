@@ -1,4 +1,3 @@
-/** @format */
 import { authenticate } from "@middleware/auth.ts";
 import validate from "@middleware/validation.ts";
 import { updateUserSchema } from "@module/user/helper.ts";

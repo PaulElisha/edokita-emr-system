@@ -1,4 +1,3 @@
-/** @format */
 import ErrorCode from "../enum/error-code.ts";
 import HttpStatus from "../enum/http.ts";
 import AppError from "./app-error.ts";

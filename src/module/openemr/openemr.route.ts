@@ -1,4 +1,3 @@
-/** @format */
 import { authenticate, withOpenEMR } from "@middleware/auth.ts";
 import OpenEMRController from "@module/openemr/openemr.controller.ts";
 import { Router } from "express";

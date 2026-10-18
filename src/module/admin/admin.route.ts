@@ -1,4 +1,3 @@
-/** @format */
 import { authenticate, withOpenEMR } from "@middleware/auth.ts";
 import { requireRole } from "@middleware/role-guard.ts";
 import AdminController from "@module/admin/admin.controller.ts";

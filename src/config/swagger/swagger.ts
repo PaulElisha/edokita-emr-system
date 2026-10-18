@@ -1,5 +1,3 @@
-/** @format */
-/** OpenAPI 3.0 spec describing our own hospital-management API. */
 import { Env } from "@/env.ts";
 import { z, type ZodObject, type ZodType } from "zod";
 import { registerSchema, loginSchema } from "@module/auth/auth.service.ts";
@@ -87,6 +85,15 @@ const jsonResponse = (description: string, schemaName: string) => ({
  content: { "application/json": { schema: envelope(schemaRef(schemaName)) } },
 });
 
+const jsonArrayResponse = (description: string, itemName: string) => ({
+ description,
+ content: {
+  "application/json": {
+   schema: envelope({ type: "array", items: schemaRef(itemName) }),
+  },
+ },
+});
+
 interface Parameter {
  name: string;
  in: "path" | "query";
@@ -119,6 +126,7 @@ const spec = {
    "A hospital management gateway built on top of the OpenEMR API (standard + FHIR R4). It exposes doctors, patients, appointments, admin metrics and patient EMR records.",
  },
  servers: [{ url: Env.LOCAL_URL, description: "Local" }],
+ security: [{ bearerAuth: [] }],
  components: {
   securitySchemes: {
    bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
@@ -236,15 +244,76 @@ const spec = {
      items: { type: "array", items: schemaRef("Patient") },
     },
    },
+   AppointmentParticipant: {
+    type: "object",
+    description: "A person, location or device on an appointment",
+    properties: {
+     role: { type: "string", example: "PPRF" },
+     type: { type: "array", items: { type: "string" } },
+     actorType: { type: "string", example: "Practitioner" },
+     actorId: { type: "string" },
+     actorDisplay: { type: "string" },
+     status: { type: "string" },
+    },
+   },
+   Appointment: {
+    type: "object",
+    properties: {
+     id: { type: "string" },
+     resourceType: { type: "string", example: "Appointment" },
+     status: { type: "string" },
+     start: { type: "string", format: "date-time" },
+     end: { type: "string", format: "date-time" },
+     type: { type: "string" },
+     typeCode: { type: "string" },
+     description: { type: "string" },
+     participants: {
+      type: "array",
+      items: schemaRef("AppointmentParticipant"),
+     },
+     patientId: {
+      type: "string",
+      description: "Id of the patient participant on the appointment",
+     },
+     doctorId: {
+      type: "string",
+      description: "Id of the practitioner (primary performer)",
+     },
+     locationId: { type: "string" },
+    },
+   },
+   AppointmentList: {
+    type: "object",
+    properties: {
+     total: { type: "integer" },
+     items: { type: "array", items: schemaRef("Appointment") },
+    },
+   },
+   AppointmentCategory: {
+    type: "object",
+    properties: {
+     code: { type: "string" },
+     name: { type: "string" },
+    },
+   },
+   Slot: {
+    type: "object",
+    properties: {
+     start: { type: "string", format: "date-time" },
+     end: { type: "string", format: "date-time" },
+     available: { type: "boolean" },
+    },
+   },
   },
  },
  paths: {
   "/api/auth/register": {
    post: {
     tags: ["Auth"],
-    summary:
-     "Sign up a patient, doctor or admin and provision the OpenEMR principal",
-    requestBody: requestBody(registerSchema),
+     summary:
+      "Sign up a patient, doctor or admin and provision the OpenEMR principal",
+     security: [],
+     requestBody: requestBody(registerSchema),
     responses: { "201": { description: "Created" } },
    },
   },
@@ -252,6 +321,7 @@ const spec = {
    post: {
     tags: ["Auth"],
     summary: "Log in with email and password; returns an app session JWT",
+    security: [],
     requestBody: requestBody(loginSchema),
     responses: { "200": { description: "OK" } },
    },
@@ -260,6 +330,7 @@ const spec = {
    post: {
     tags: ["Auth"],
     summary: "Exchange a refresh token for a new access/refresh token pair",
+    security: [],
     requestBody: requestBody(refreshTokenSchema),
     responses: { "200": { description: "OK" } },
    },
@@ -278,6 +349,7 @@ const spec = {
     tags: ["Auth"],
     summary:
      "Request a password reset token (returned only outside production)",
+    security: [],
     requestBody: requestBody(forgotPasswordSchema),
     responses: { "200": { description: "OK" } },
    },
@@ -286,6 +358,7 @@ const spec = {
    post: {
     tags: ["Auth"],
     summary: "Set a new password using a reset token",
+    security: [],
     requestBody: requestBody(resetPasswordSchema),
     responses: { "200": { description: "OK" } },
    },
@@ -327,6 +400,7 @@ const spec = {
    get: {
     tags: ["Auth"],
     summary: "OAuth2 redirect target; exchanges the code for tokens",
+    security: [],
     responses: { "302": { description: "Redirect to frontend" } },
    },
   },
@@ -350,6 +424,7 @@ const spec = {
    get: {
     tags: ["System"],
     summary: "OpenEMR engine and version",
+    security: [],
     responses: { "200": { description: "OK" } },
    },
   },
@@ -357,6 +432,7 @@ const spec = {
    get: {
     tags: ["System"],
     summary: "Capability statement (supported FHIR resource types)",
+    security: [],
     responses: { "200": { description: "OK" } },
    },
   },
@@ -450,23 +526,24 @@ const spec = {
   "/api/appointments": {
    get: {
     tags: ["Appointments"],
-    summary: "List appointments (filter by patient/practitioner/date/status)",
+    summary:
+     "List appointments (doctors are scoped to their own; filter by patient/practitioner/date/status)",
     parameters: paramsFrom(appointmentListQuerySchema, "query"),
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonResponse("OK", "AppointmentList") },
    },
    post: {
     tags: ["Appointments"],
     summary:
      "Book an appointment (patients book for themselves; staff may set patientId)",
     requestBody: requestBody(appointmentBodySchema),
-    responses: { "201": { description: "Created" } },
+    responses: { "201": jsonResponse("Created", "Appointment") },
    },
   },
   "/api/appointments/categories": {
    get: {
     tags: ["Appointments"],
     summary: "List appointment categories (visit types)",
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonArrayResponse("OK", "AppointmentCategory") },
    },
   },
   "/api/appointments/slots": {
@@ -474,7 +551,7 @@ const spec = {
     tags: ["Appointments"],
     summary: "List bookable slots for a provider on a day",
     parameters: paramsFrom(slotsQuerySchema, "query"),
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonArrayResponse("OK", "Slot") },
    },
   },
   "/api/appointments/{id}": {
@@ -482,7 +559,7 @@ const spec = {
     tags: ["Appointments"],
     summary: "Get an appointment by id (local status overlay applied)",
     parameters: paramsFrom(idParamSchema, "path", true),
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonResponse("OK", "Appointment") },
    },
    patch: {
     tags: ["Appointments"],
@@ -490,13 +567,13 @@ const spec = {
      "Update appointment status, reschedule window or note (local overlay)",
     parameters: paramsFrom(idParamSchema, "path", true),
     requestBody: requestBody(appointmentUpdateSchema),
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonResponse("OK", "Appointment") },
    },
    delete: {
     tags: ["Appointments"],
     summary: "Cancel/remove an appointment (deletes upstream in OpenEMR)",
     parameters: paramsFrom(idParamSchema, "path", true),
-    responses: { "200": { description: "OK" } },
+    responses: { "200": jsonResponse("OK", "Appointment") },
    },
   },
   "/api/emr/{patientId}/summary": {

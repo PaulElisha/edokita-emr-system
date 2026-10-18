@@ -1,4 +1,5 @@
 /** @format */
+
 import { Env } from "@/env.ts";
 import logger from "@app/logger.ts";
 import { errorHandler } from "@middleware/error-handler.ts";

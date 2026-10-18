@@ -1,4 +1,3 @@
-/** Helpers to normalize FHIR resources into clean JSON for our API. */
 import { differenceInYears, isBefore } from "date-fns";
 import { IDENTIFIER_SYSTEM } from "@shared/utils/fhir.ts";
 import type {
@@ -63,7 +62,6 @@ export interface MappedPractitioner extends NameParts {
  stateLicenseNumber?: string;
 }
 
-/** The clinician OpenEMR attributes a record to (id is a Practitioner uuid). */
 export interface MappedProvider {
   id?: string;
   name?: string;
@@ -85,12 +83,10 @@ export interface MappedClinical {
   value?: { value?: number | string; unit?: string };
   subjectId?: string;
   encounterId?: string;
-  /** When our API recorded this record (OpenEMR itself stores no author/time). */
   authoredAt?: string;
 }
 
 export interface MappedParticipant {
- /** HL7 participation code: `PART` (patient), `PPRF` (primary performer), `LOC` (location). */
  role?: string;
  type: string[];
  actorType?: string;
@@ -125,7 +121,6 @@ export interface MappedEncounter {
   end?: string;
   subjectId?: string;
   provider?: MappedProvider;
-  /** When our API recorded this record (OpenEMR itself stores no author/time). */
   authoredAt?: string;
 }
 
@@ -211,7 +206,6 @@ export function mapPractitioner(p: FhirPractitioner): MappedPractitioner {
   };
 }
 
-/** Each clinical resource spells its "code" differently. */
 function clinicalCode(r: FhirClinicalResource): string | undefined {
   if ("code" in r) return conceptText(r.code);
   if ("medicationCodeableConcept" in r) return conceptText(r.medicationCodeableConcept);
@@ -219,7 +213,6 @@ function clinicalCode(r: FhirClinicalResource): string | undefined {
   return undefined;
 }
 
-/** `category` is `CodeableConcept[]`, except AllergyIntolerance's `string[]`. */
 function clinicalCategory(r: FhirClinicalResource): string[] {
   if (!("category" in r) || !r.category) return [];
   const cats = Array.isArray(r.category) ? r.category : [r.category];
@@ -228,7 +221,6 @@ function clinicalCategory(r: FhirClinicalResource): string[] {
     .filter((c): c is string => Boolean(c));
 }
 
-/** Onset differs between Condition/AllergyIntolerance; absent elsewhere. */
 function clinicalOnset(r: FhirClinicalResource): string | undefined {
   if ("onsetDateTime" in r) return r.onsetDateTime;
   if ("onsetPeriod" in r) return r.onsetPeriod?.start;
@@ -236,7 +228,6 @@ function clinicalOnset(r: FhirClinicalResource): string | undefined {
   return undefined;
 }
 
-/** Clinically-relevant date, spread across several FHIR fields. */
 function clinicalDate(r: FhirClinicalResource): string | undefined {
   if ("occurrenceDateTime" in r) return r.occurrenceDateTime;
   if ("occurrenceString" in r) return r.occurrenceString;
@@ -247,7 +238,6 @@ function clinicalDate(r: FhirClinicalResource): string | undefined {
   return undefined;
 }
 
-/** Some resources reference the patient via `subject`, others via `patient`. */
 function clinicalSubjectId(r: FhirClinicalResource): string | undefined {
   if ("subject" in r) return referenceId(r.subject);
   if ("patient" in r) return referenceId(r.patient);
@@ -258,8 +248,6 @@ export function mapClinical(
   resource: FhirClinicalResource,
   kind: string,
 ): MappedClinical {
-  // OpenEMR only attributes a clinician to MedicationRequest (`requester`);
-  // conditions/allergies/observations carry no author.
   const providerId =
     "requester" in resource ? referenceId(resource.requester) : undefined;
   return {
@@ -287,12 +275,6 @@ export function mapClinical(
   };
 }
 
-/**
- * OpenEMR leaves `pc_apptstatus` at its default (`-` -> FHIR `proposed`) unless
- * staff check a patient out, so a past appointment would otherwise report
- * `proposed` forever. Keep genuinely terminal statuses and otherwise derive one
- * from the appointment window.
- */
 const TERMINAL_APPOINTMENT_STATUSES = new Set([
  "cancelled",
  "noshow",
@@ -317,8 +299,6 @@ export function mapAppointment(a: FhirAppointment): MappedAppointment {
   actorDisplay: p.actor?.display,
   status: p.status,
  }));
- // Identify by participation code first, falling back to the actor reference type.
- // A provider without an NPI is returned as a `Person` (not `Practitioner`) actor.
  const byRole = (code: string): string | undefined =>
   participants.find((p) => p.role === code)?.actorId;
  const byActor = (actorType: string): string | undefined =>
@@ -340,8 +320,6 @@ export function mapAppointment(a: FhirAppointment): MappedAppointment {
 }
 
 export function mapEncounter(e: FhirEncounter): MappedEncounter {
-  // The performing clinician is the `PPRF` participant; OpenEMR returns providers
-  // without an NPI as a `Person` actor rather than `Practitioner`.
   const performer = (e.participant ?? []).find((p) => {
     const role = p.type?.[0]?.coding?.[0]?.code;
     const actorType =
@@ -371,4 +349,3 @@ export function calcAge(birthDate: string): number {
  const age = differenceInYears(new Date(), new Date(birthDate));
  return age < 0 ? 0 : age;
 }
-

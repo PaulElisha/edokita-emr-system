@@ -1,4 +1,3 @@
-/** @format */
 import {
  mapPatient,
  mapPractitioner,
@@ -26,7 +25,10 @@ import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { findConnectedPatientIds } from "@module/doctor/helper.ts";
 import type { PatientListResult } from "@module/patient/patient.service.ts";
+import { chunk } from "@shared/utils/array.ts";
 import { z } from "zod";
+
+const PATIENT_ID_CHUNK = 50;
 
 export const doctorListQuerySchema = fhirListQuerySchema.extend({
  active: z.enum(["true", "false"]).optional(),
@@ -68,7 +70,7 @@ class DoctorService {
  ): Promise<Result<DoctorListResult>> => {
   try {
    const params: Record<string, QueryValue> = {
-    _count: query._count ?? 100,
+    _count: query._count,
    };
    if (query.family) params.family = query.family;
    if (query.given) params.given = query.given;
@@ -150,22 +152,33 @@ class DoctorService {
   }
  };
 
- myPatients = async (
-  client: OpenEMRClient,
-  userId: string,
- ): Promise<Result<PatientListResult>> => {
-  try {
-   const [ids, err] = await findConnectedPatientIds(client, userId);
-   if (err || !ids) return [null, err];
-   const patients = await Promise.all(
-    ids.map((id) => client.fhirRead<FhirPatient>("Patient", id)),
-   );
-   const items = patients.map(mapPatient);
-   return [{ total: items.length, items }, null];
-  } catch (e) {
-   return [null, toError(e)];
-  }
- };
+  myPatients = async (
+   client: OpenEMRClient,
+   userId: string,
+  ): Promise<Result<PatientListResult>> => {
+   try {
+    const [ids, err] = await findConnectedPatientIds(client, userId);
+    if (err || !ids) return [null, err];
+    if (ids.length === 0) return [{ total: 0, items: [] }, null];
+
+    const bundles = await Promise.all(
+     chunk(ids, PATIENT_ID_CHUNK).map((group) =>
+      client.fhirSearch("Patient", {
+       _id: group.join(","),
+       _count: group.length,
+      }),
+     ),
+    );
+    const items = bundles
+     .flatMap((bundle) => bundle.entry ?? [])
+     .map((e) => e.resource as FhirPatient)
+     .filter((r) => r?.resourceType === "Patient")
+     .map(mapPatient);
+    return [{ total: items.length, items }, null];
+   } catch (e) {
+    return [null, toError(e, "myPatients")];
+   }
+  };
 }
 
 export default new DoctorService();

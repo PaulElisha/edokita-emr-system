@@ -1,4 +1,3 @@
-/** @format */
 import type { HttpStatusCodeType } from "@enum/http.ts";
 import type { ErrorCodeType } from "@enum/error-code.ts";
 
@@ -8,10 +7,10 @@ export default class AppError extends Error {
   public statusCode: HttpStatusCodeType,
   public errorCode: ErrorCodeType,
   public details?: unknown,
+  cause?: unknown,
  ) {
-  super(message);
+  super(message, cause === undefined ? undefined : { cause });
   this.name = this.constructor.name;
-  this.message = message;
   this.statusCode = statusCode;
   this.errorCode = errorCode;
   this.details = details;

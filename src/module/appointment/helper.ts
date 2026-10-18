@@ -1,21 +1,30 @@
-/** @format */
 import { OpenEMR } from "@/env.ts";
-import { roleSchema } from "@db/schema/role.ts";
 import APIError from "@error/APIError.ts";
 import type OpenEMRClient from "@module/openemr/client.ts";
+import { type QueryValue } from "@module/openemr/client.ts";
 import type {
+ AppointmentListQuery,
  AppointmentPatientInput,
  AppointmentWindowInput,
  CreateAppointmentInput,
  SlotsQuery,
 } from "@module/appointment/appointment.service.ts";
-import { findUserById } from "@module/user/helper.ts";
 import PatientService from "@module/patient/patient.service.ts";
+import { resolveOwnPatientId } from "@module/patient/helper.ts";
+import { findUserPractitionerId } from "@module/user/helper.ts";
 import type { FhirAppointment, FhirValueSet } from "@shared/types/fhir.ts";
 import type { Result } from "@shared/types.ts";
 import { toDateString, toTimeString } from "@shared/utils/date.ts";
-import { addMinutes, differenceInSeconds, isAfter } from "date-fns";
+import {
+ addMinutes,
+ differenceInSeconds,
+ isAfter,
+ isValid,
+ parseISO,
+ set,
+} from "date-fns";
 import { toError } from "@shared/error/error.ts";
+import { listOpenEMRUsers } from "@module/openemr/helpers.ts";
 import {
  mapAppointment,
  type MappedAppointment,
@@ -26,13 +35,10 @@ import {
  overrideIsInactive,
 } from "@module/appointment/overlay.ts";
 import { resolveWorkingHours } from "@module/schedule/helper.ts";
-import { z } from "zod";
+import type { RequestActor } from "@module/auth/helper.ts";
 
 const DEFAULT_DURATION_MINUTES = 30;
-
-/**
- * Patient uuids a doctor is connected to through appointments.
- */
+export const APPOINTMENT_FETCH_CAP = 500;
 
 export interface AppointmentWindow {
  start: string;
@@ -54,37 +60,16 @@ export interface AppointmentBooking {
  window: AppointmentWindow;
 }
 
-export const bookingActorSchema = z.object({
- userId: z.string().min(1),
- role: roleSchema,
-});
-export type BookingActor = z.infer<typeof bookingActorSchema>;
-
-/** Patients may only book for themselves; staff may book on behalf of any patient. */
 export async function resolvePatientId(
  client: OpenEMRClient,
  input: AppointmentPatientInput,
- actor: BookingActor,
+ actor: RequestActor,
 ): Promise<Result<string>> {
  try {
-  if (actor.role === "patient") {
-   const [user, err] = await findUserById(actor.userId);
-   if (err || !user) return [null, err];
-   const patientId = user.openemr.patientId;
-   if (!patientId) {
-    return [
-     null,
-     APIError.badRequest(
-      "Your account is not linked to an OpenEMR patient record",
-     ),
-    ];
-   }
-   return [patientId, null];
-  }
+  if (actor.role === "patient") return resolveOwnPatientId(actor.userId);
   if (!input.patientId) {
    return [null, APIError.badRequest("patientId is required")];
   }
-  // Verify the specified patient exists for non-patient actors
   const [, err] = await PatientService.get(client, input.patientId);
   if (err) return [null, APIError.badRequest("Invalid patientId")];
   return [input.patientId, null];
@@ -93,24 +78,53 @@ export async function resolvePatientId(
  }
 }
 
-/** OpenEMR FHIR `appointment-type` ValueSet id that holds the visit types. */
+export async function assertAppointmentAccess(
+ appointment: MappedAppointment,
+ actor: RequestActor,
+): Promise<Result<void>> {
+ if (actor.role !== "patient") return [undefined, null];
+ const [ownId, err] = await resolveOwnPatientId(actor.userId);
+ if (err || !ownId) return [null, err];
+ if (appointment.patientId !== ownId) {
+  return [null, APIError.notFound("Appointment not found")];
+ }
+ return [undefined, null];
+}
+
+export interface AppointmentSearchScope {
+ params: Record<string, QueryValue>;
+ practitionerId?: string;
+}
+
+export async function appointmentSearchScope(
+ query: AppointmentListQuery,
+ actor: RequestActor,
+): Promise<Result<AppointmentSearchScope>> {
+ if (actor.role === "patient") {
+  const [patientId, err] = await resolveOwnPatientId(actor.userId);
+  if (err || !patientId) return [null, err];
+  return [{ params: { patient: patientId } }, null];
+ }
+
+ const params: Record<string, QueryValue> = {};
+ if (query.patient) params.patient = query.patient;
+
+ let practitionerId = query.practitioner;
+ if (!practitionerId && actor.role === "doctor") {
+  const [own, err] = await findUserPractitionerId(actor.userId);
+  if (err || !own) return [null, err];
+  practitionerId = own;
+ }
+ return [{ params, practitionerId }, null];
+}
+
 const APPOINTMENT_TYPE_VALUESET = "appointment-type";
 
-/** A bookable visit type; `code` is OpenEMR's `pc_constant_id`. */
 export interface AppointmentCategory {
  code: string;
  name: string;
 }
 
-/**
- * Appointment categories (visit types) from OpenEMR's `appointment-type` FHIR
- * ValueSet, for booking UIs.
- *
- * OpenEMR has no standard REST endpoint for these — they live in
- * `openemr_postcalendar_categories` and are exposed only through this ValueSet.
- * The `_id` and `:uuid` reads are broken upstream (they filter on a nonexistent
- * `id` column), so fetch the collection and pick the `appointment-type` entry.
- */
 export async function listCategories(
  client: OpenEMRClient,
 ): Promise<Result<AppointmentCategory[]>> {
@@ -134,7 +148,6 @@ export async function listCategories(
  }
 }
 
-/** Maps our input onto OpenEMR's Standard REST `pc_event` fields. */
 export function buildAppointmentPayload(
  input: CreateAppointmentInput,
  booking: AppointmentBooking,
@@ -161,20 +174,13 @@ export function buildAppointmentPayload(
  };
 }
 
-/**
- * OpenEMR stores a provider on an appointment as the numeric `users.id` (`pc_aid`),
- * while our API/FHIR identify practitioners by uuid. Accept either and translate.
- */
 export async function resolveProviderId(
  client: OpenEMRClient,
  providerId: string,
 ): Promise<Result<string>> {
  try {
   if (/^\d+$/.test(providerId)) return [providerId, null];
-  const users = await client.standardGet<{
-   id?: string | number;
-   uuid?: string;
-  }>("/api/user");
+  const users = await listOpenEMRUsers(client);
   const match = users.find((u) => u.uuid === providerId);
   if (!match?.id) return [null, APIError.badRequest("Invalid doctorId")];
   return [String(match.id), null];
@@ -188,7 +194,6 @@ interface TimeWindow {
  end: number;
 }
 
-/** Busy windows (epoch ms) for a provider on a given calendar day. */
 async function fetchBookedWindows(
  client: OpenEMRClient,
  doctorId: string,
@@ -196,14 +201,14 @@ async function fetchBookedWindows(
 ): Promise<Result<TimeWindow[]>> {
  try {
   const bundle = await client.fhirSearch("Appointment", {
-   "actor:Practitioner": doctorId,
    date,
-   _count: 100,
+   _count: APPOINTMENT_FETCH_CAP,
   });
 
   const appointments = (bundle.entry ?? [])
    .map((e) => e.resource as FhirAppointment)
-   .filter((a) => a?.resourceType === "Appointment");
+   .filter((a) => a?.resourceType === "Appointment")
+   .filter((a) => mapAppointment(a).doctorId === doctorId);
 
   const [overrides] = await getOverrides(
    appointments.map((a) => a.id).filter((id): id is string => Boolean(id)),
@@ -214,7 +219,7 @@ async function fetchBookedWindows(
     const override = a.id ? overrides?.get(a.id) : undefined;
     if (override && overrideIsInactive(override.status)) return null;
     const start = new Date(override?.start ?? a.start ?? 0);
-    if (Number.isNaN(start.getTime())) return null;
+    if (!isValid(start)) return null;
     const rawEnd = override?.end ?? a.end;
     const end = rawEnd
      ? new Date(rawEnd)
@@ -233,7 +238,6 @@ function overlaps(a: TimeWindow, b: TimeWindow): boolean {
  return a.start < b.end && b.start < a.end;
 }
 
-/** 409 when the provider already has a non-cancelled overlapping appointment. */
 export async function assertNoConflict(
  client: OpenEMRClient,
  doctorId: string,
@@ -271,27 +275,28 @@ export interface Slot {
  available: boolean;
 }
 
-/** Open/busy slots for a provider on a day, computed from working hours minus bookings. */
 export async function computeSlots(
  client: OpenEMRClient,
  query: SlotsQuery,
 ): Promise<Result<Slot[]>> {
  try {
-  const [year, month, day] = query.date.split("-").map(Number);
-  const [schedule, serr] = await resolveWorkingHours(
-   query.doctorId,
-   new Date(year, month - 1, day),
-  );
+  const day = parseISO(query.date);
+  if (!isValid(day)) return [null, APIError.badRequest("Invalid date")];
+  const [schedule, serr] = await resolveWorkingHours(query.doctorId, day);
   if (serr || !schedule) {
    return [null, serr];
   }
   const slotMinutes =
    query.slotMinutes ?? schedule.slotMinutes ?? DEFAULT_DURATION_MINUTES;
-  const hours = { start: schedule.start, end: schedule.end };
-  const [startHour, startMinute] = hours.start.split(":").map(Number);
-  const [endHour, endMinute] = hours.end.split(":").map(Number);
+  const [startHour, startMinute] = schedule.start.split(":").map(Number);
+  const [endHour, endMinute] = schedule.end.split(":").map(Number);
 
-  const dayEnd = new Date(year, month - 1, day, endHour, endMinute, 0, 0);
+  const dayEnd = set(day, {
+   hours: endHour,
+   minutes: endMinute,
+   seconds: 0,
+   milliseconds: 0,
+  });
   const [booked, err] = await fetchBookedWindows(
    client,
    query.doctorId,
@@ -301,7 +306,12 @@ export async function computeSlots(
 
   const slots: Slot[] = [];
   for (
-   let cursor = new Date(year, month - 1, day, startHour, startMinute, 0, 0),
+   let cursor = set(day, {
+     hours: startHour,
+     minutes: startMinute,
+     seconds: 0,
+     milliseconds: 0,
+    }),
     end = addMinutes(cursor, slotMinutes);
    !isAfter(end, dayEnd);
    cursor = end, end = addMinutes(cursor, slotMinutes)
@@ -321,10 +331,6 @@ export async function computeSlots(
  }
 }
 
-/**
- * Fetch the exact appointment just created. The Standard `POST` returns only the numeric
- * `eid`; resolve its `pc_uuid` (== FHIR `id`) via the Standard read, then load it as FHIR.
- */
 export async function findAppointment(
  client: OpenEMRClient,
  eid: string,
@@ -357,16 +363,14 @@ export function fallbackAppointment(
    actorId: booking.patientId,
    status: "accepted",
   },
- ];
- if (input.doctorId) {
-  participants.push({
+  {
    role: "PPRF",
    type: ["Primary Performer"],
    actorType: "Practitioner",
    actorId: input.doctorId,
    status: "accepted",
-  });
- }
+  },
+ ];
  return {
   resourceType: "Appointment",
   status: "booked",

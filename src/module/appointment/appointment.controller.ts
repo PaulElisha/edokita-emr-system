@@ -1,8 +1,7 @@
-/** @format */
-import type { JwtPayload } from "@auth/jwt.ts";
 import asyncHandler from "@middleware/async-handler.ts";
 import type { IdParam } from "@shared/schemas/params.ts";
 import type { OpenEMRRequest } from "@shared/http.ts";
+import { actor } from "@module/auth/helper.ts";
 import type { Request, Response } from "express";
 import AppointmentService, {
  type AppointmentListQuery,
@@ -10,11 +9,6 @@ import AppointmentService, {
  type SlotsQuery,
  type UpdateAppointmentInput,
 } from "@module/appointment/appointment.service.ts";
-import type { BookingActor } from "@module/appointment/helper.ts";
-
-function actor(req: { user: JwtPayload }): BookingActor {
- return { userId: req.user.userId, role: req.user.role };
-}
 
 class AppointmentController {
  getAppointments = asyncHandler(

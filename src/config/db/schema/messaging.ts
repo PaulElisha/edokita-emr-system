@@ -1,4 +1,3 @@
-/** @format */
 import { sql } from "drizzle-orm";
 import {
  index,
@@ -11,11 +10,6 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./user.ts";
 
-/**
- * Local secure messaging. OpenEMR's message API has no read/list endpoint, so
- * conversations and messages are owned by this app while OpenEMR keeps the
- * clinical chart.
- */
 export const conversationThreads = pgTable("conversation_threads", {
  id: uuid("id")
   .primaryKey()

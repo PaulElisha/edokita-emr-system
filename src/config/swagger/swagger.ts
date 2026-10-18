@@ -27,6 +27,7 @@ import {
  emrClinicalItemParamSchema,
  emrClinicalParamSchema,
  emrEncounterParamSchema,
+ emrObservationParamSchema,
  emrPatientParamSchema,
  emrSoapNoteParamSchema,
  emrVitalItemParamSchema,
@@ -58,6 +59,7 @@ import {
  labOrderListQuerySchema,
  labResultBodySchema,
  labResultListQuerySchema,
+ labResultParamSchema,
 } from "@module/lab/lab.service.ts";
 import { updateUserSchema } from "@module/user/helper.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
@@ -302,6 +304,77 @@ const spec = {
      start: { type: "string", format: "date-time" },
      end: { type: "string", format: "date-time" },
      available: { type: "boolean" },
+    },
+   },
+   ObservationValue: {
+    type: "object",
+    properties: {
+     value: {
+      oneOf: [{ type: "number" }, { type: "string" }, { type: "boolean" }],
+     },
+     unit: { type: "string" },
+    },
+   },
+   ObservationReferenceRange: {
+    type: "object",
+    properties: {
+     low: { type: "number" },
+     high: { type: "number" },
+     unit: { type: "string" },
+     text: { type: "string" },
+    },
+   },
+   Observation: {
+    type: "object",
+    properties: {
+     id: { type: "string" },
+     code: { type: "string" },
+     category: { type: "array", items: { type: "string" } },
+     effective: { type: "string", format: "date-time" },
+     value: schemaRef("ObservationValue"),
+     referenceRange: {
+      type: "array",
+      items: schemaRef("ObservationReferenceRange"),
+     },
+     components: {
+      type: "array",
+      items: {
+       type: "object",
+       properties: {
+        code: { type: "string" },
+        value: schemaRef("ObservationValue"),
+       },
+      },
+     },
+     encounterId: { type: "string" },
+     provider: {
+      type: "object",
+      properties: { id: { type: "string" }, name: { type: "string" } },
+     },
+     authoredAt: { type: "string", format: "date-time" },
+    },
+   },
+   LabResult: {
+    type: "object",
+    additionalProperties: true,
+    properties: {
+     result_uuid: { type: "string" },
+     procedure_result_id: { type: "integer" },
+     result_code: { type: "string" },
+     result_text: { type: "string" },
+     result: { type: "string" },
+     units: { type: "string" },
+     range: { type: "string" },
+     abnormal: { type: "string" },
+     result_status: { type: "string" },
+     date: { type: "string" },
+     comments: { type: "string" },
+     procedure_report_id: { type: "integer" },
+     procedure_order_id: { type: "integer" },
+     date_report: { type: "string" },
+     report_status: { type: "string" },
+     review_status: { type: "string" },
+     patient_id: { type: "integer" },
     },
    },
   },
@@ -607,6 +680,14 @@ const spec = {
     summary: "Laboratory observations",
     parameters: paramsFrom(emrPatientParamSchema, "path", true),
     responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/emr/{patientId}/labs/{observationId}": {
+   get: {
+    tags: ["EMR"],
+    summary: "Get a single laboratory observation for a patient",
+    parameters: paramsFrom(emrObservationParamSchema, "path", true),
+    responses: { "200": jsonResponse("OK", "Observation") },
    },
   },
   "/api/emr/{patientId}/encounters": {
@@ -932,6 +1013,15 @@ const spec = {
     security: [{ bearerAuth: [] }],
     requestBody: requestBody(labResultBodySchema),
     responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/lab/results/{resultId}": {
+   get: {
+    tags: ["Lab"],
+    summary: "Get a single lab result by result id (uuid)",
+    parameters: paramsFrom(labResultParamSchema, "path", true),
+    security: [{ bearerAuth: [] }],
+    responses: { "200": jsonResponse("OK", "LabResult") },
    },
   },
  },

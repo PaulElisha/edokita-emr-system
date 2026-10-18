@@ -1,4 +1,4 @@
-import { db } from "@db/db.ts";
+import { db as defaultDb } from "@db/db.ts";
 import type { DbClient } from "@db/transaction.ts";
 import { openemrAuthStates, openemrTokens } from "@db/schema/openemr.ts";
 import { passwordResetTokens, refreshTokens } from "@db/schema/auth.ts";
@@ -60,7 +60,7 @@ const SKEW_MS = 30_000;
 export async function saveTokens(
  userId: string,
  tokens: SaveTokenInput,
- client: DbClient = db,
+ db: DbClient = defaultDb,
 ): Promise<Result<void>> {
  try {
   const values = {
@@ -71,7 +71,7 @@ export async function saveTokens(
    subject: tokens.subject,
    updatedAt: new Date(),
   };
-  await client
+  await db
    .insert(openemrTokens)
    .values({ userId, ...values })
    .onConflictDoUpdate({ target: openemrTokens.userId, set: values });
@@ -212,7 +212,7 @@ export async function getTokens(
  userId: string,
 ): Promise<Result<OpenEMRTokenSet>> {
  try {
-  const [row] = await db
+  const [row] = await defaultDb
    .select()
    .from(openemrTokens)
    .where(eq(openemrTokens.userId, userId))
@@ -233,14 +233,17 @@ export async function getTokens(
 
 export async function clearTokens(userId: string): Promise<Result<void>> {
  try {
-  await db.delete(openemrTokens).where(eq(openemrTokens.userId, userId));
+  await defaultDb.delete(openemrTokens).where(eq(openemrTokens.userId, userId));
   return [undefined, null];
  } catch (e) {
   return [null, toError(e)];
  }
 }
 
-export async function clearAccessToken(userId: string): Promise<Result<void>> {
+export async function clearAccessToken(
+ userId: string,
+ db: DbClient = defaultDb,
+): Promise<Result<void>> {
  try {
   await db
    .update(openemrTokens)
@@ -257,7 +260,7 @@ export async function savePending(
  pending: PendingAuth,
 ): Promise<Result<void>> {
  try {
-  await db
+  await defaultDb
    .delete(openemrAuthStates)
    .where(
     lt(openemrAuthStates.createdAt, new Date(Date.now() - PENDING_TTL_MS)),
@@ -269,7 +272,7 @@ export async function savePending(
    nonce: pending.nonce,
    createdAt: new Date(pending.createdAt),
   };
-  await db
+  await defaultDb
    .insert(openemrAuthStates)
    .values({ state, ...values })
    .onConflictDoUpdate({ target: openemrAuthStates.state, set: values });
@@ -281,7 +284,7 @@ export async function savePending(
 
 export async function takePending(state: string): Promise<Result<PendingAuth>> {
  try {
-  const [row] = await db
+  const [row] = await defaultDb
    .delete(openemrAuthStates)
    .where(eq(openemrAuthStates.state, state))
    .returning();
@@ -339,20 +342,24 @@ function hashToken(raw: string): string {
  return createHash("sha256").update(raw).digest("hex");
 }
 
-export async function issueSession(user: User): Promise<Result<AuthResult>> {
+export async function issueSession(
+ user: User,
+ db: DbClient = defaultDb,
+): Promise<Result<AuthResult>> {
  const token = await signAppToken({
   userId: user.id,
   role: user.role,
   email: user.email,
   sessionEpoch: user.sessionEpoch,
  });
- const [issued, err] = await issueRefreshToken(user.id);
+ const [issued, err] = await issueRefreshToken(user.id, db);
  if (err || !issued) return [null, err];
  return [{ user: toPublicUser(user), token, refreshToken: issued.token }, null];
 }
 
 export async function issueRefreshToken(
  userId: string,
+ db: DbClient = defaultDb,
 ): Promise<Result<IssuedRefreshToken>> {
  try {
   const token = generateToken();
@@ -378,7 +385,7 @@ export async function verifyRefreshToken(
  raw: string,
 ): Promise<Result<VerifiedRefreshToken>> {
  try {
-  const [row] = await db
+  const [row] = await defaultDb
    .select()
    .from(refreshTokens)
    .where(
@@ -404,7 +411,7 @@ export function isIdle(lastActivity: Date): boolean {
 
 export async function revokeRefreshToken(raw: string): Promise<Result<void>> {
  try {
-  await db
+  await defaultDb
    .update(refreshTokens)
    .set({ revoked: true, revokedAt: new Date() })
    .where(eq(refreshTokens.tokenHash, hashToken(raw)));
@@ -416,6 +423,7 @@ export async function revokeRefreshToken(raw: string): Promise<Result<void>> {
 
 export async function revokeUserRefreshTokens(
  userId: string,
+ db: DbClient = defaultDb,
 ): Promise<Result<void>> {
  try {
   await db
@@ -436,7 +444,7 @@ export async function issuePasswordResetToken(
  try {
   const token = generateToken();
   const expiresAt = new Date(Date.now() + RESET_TTL_MS);
-  await db
+  await defaultDb
    .insert(passwordResetTokens)
    .values({ userId, tokenHash: hashToken(token), expiresAt });
   return [token, null];
@@ -447,6 +455,7 @@ export async function issuePasswordResetToken(
 
 export async function consumePasswordResetToken(
  raw: string,
+ db: DbClient = defaultDb,
 ): Promise<Result<string>> {
  try {
   const [row] = await db

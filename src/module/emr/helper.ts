@@ -42,6 +42,7 @@ import {
  toDateTimeString,
 } from "@shared/utils/date.ts";
 import { toError } from "@shared/error/error.ts";
+import APIError from "@error/APIError.ts";
 import { findUserNamesByPractitionerIds } from "@module/user/helper.ts";
 
 const CLINICAL_RESOURCES: Record<ClinicalKind, string> = {
@@ -256,6 +257,60 @@ function toMetric(value: ObservationValue): ObservationValue {
  }
 }
 
+function mapObservation(o: FhirObservation): ObservationItem {
+ const components = (o.component ?? [])
+  .map((c) => {
+   const value =
+    toValue(c.valueQuantity) ??
+    toValue(undefined, c.valueString, c.valueInteger) ??
+    (c.valueCodeableConcept
+     ? { value: conceptText(c.valueCodeableConcept) }
+     : undefined);
+   return {
+    code: conceptText(c.code),
+    value: value ? toMetric(value) : undefined,
+   };
+  })
+  .filter((c) => Boolean(c.code) && c.value !== undefined);
+  const value = observationValue(o);
+  const referenceRange = (o.referenceRange ?? [])
+   .map((r) => ({
+    low: r.low?.value,
+    high: r.high?.value,
+    unit: r.low?.unit ?? r.high?.unit,
+    text: r.text,
+   }))
+   .filter(
+    (r) => r.low !== undefined || r.high !== undefined || Boolean(r.text),
+   );
+  const item: ObservationItem = {
+   id: o.id,
+   code: conceptText(o.code),
+   category: (o.category ?? [])
+    .map((c) => c.text ?? c.coding?.[0]?.code)
+    .filter((c): c is string => Boolean(c)),
+   effective: o.effectiveDateTime,
+   value: value ? toMetric(value) : undefined,
+   encounterId: referenceId(o.encounter),
+  };
+  const ranged =
+   referenceRange.length > 0 ? { ...item, referenceRange } : item;
+  return components.length > 0 ? { ...ranged, components } : ranged;
+ }
+
+function attributeObservation(
+ item: ObservationItem,
+ authorMap: EmrAuthorMap,
+): ObservationItem {
+ const author =
+  (item.encounterId
+   ? authorMap.get(`encounter:${item.encounterId}`)
+   : undefined) ??
+  (item.id ? authorMap.get(`lab_result:${item.id}`) : undefined);
+ if (!author) return item;
+ return { ...item, provider: author.provider, authoredAt: author.authoredAt };
+}
+
 export async function searchObservations(
  client: OpenEMRClient,
  patientId: string,
@@ -268,50 +323,37 @@ export async function searchObservations(
    category,
    _count: 200,
   });
-  const items: ObservationItem[] = (bundle.entry ?? [])
+  const items = (bundle.entry ?? [])
    .map((e) => e.resource as FhirObservation)
    .filter((r) => r?.resourceType === "Observation")
-   .map((o) => {
-    const components = (o.component ?? [])
-     .map((c) => {
-      const value =
-       toValue(c.valueQuantity) ??
-       toValue(undefined, c.valueString, c.valueInteger) ??
-       (c.valueCodeableConcept
-        ? { value: conceptText(c.valueCodeableConcept) }
-        : undefined);
-      return {
-       code: conceptText(c.code),
-       value: value ? toMetric(value) : undefined,
-      };
-     })
-     .filter((c) => Boolean(c.code) && c.value !== undefined);
-    const value = observationValue(o);
-    const item: ObservationItem = {
-     id: o.id,
-     code: conceptText(o.code),
-     category: (o.category ?? [])
-      .map((c) => c.text ?? c.coding?.[0]?.code)
-      .filter((c): c is string => Boolean(c)),
-     effective: o.effectiveDateTime,
-     value: value ? toMetric(value) : undefined,
-     encounterId: referenceId(o.encounter),
-    };
-    return components.length > 0 ? { ...item, components } : item;
-   });
+   .map(mapObservation);
 
   const authorMap = authors ?? (await findEmrAuthorsByPatient(patientId));
-  for (const item of items) {
-   const author =
-    (item.encounterId
-     ? authorMap.get(`encounter:${item.encounterId}`)
-     : undefined) ?? (item.id ? authorMap.get(`lab_result:${item.id}`) : undefined);
-   if (!author) continue;
-   item.provider = author.provider;
-   item.authoredAt = author.authoredAt;
-  }
+  const attributed = items.map((item) => attributeObservation(item, authorMap));
 
-  return [{ total: bundle.total ?? items.length, items }, null];
+  return [{ total: bundle.total ?? attributed.length, items: attributed }, null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+export async function getObservation(
+ client: OpenEMRClient,
+ patientId: string,
+ observationId: string,
+ authors?: EmrAuthorMap,
+): Promise<Result<ObservationItem>> {
+ try {
+  const [result, err] = await searchObservations(
+   client,
+   patientId,
+   "laboratory",
+   authors,
+  );
+  if (err || !result) return [null, err];
+  const item = result.items.find((i) => i.id === observationId);
+  if (!item) return [null, APIError.notFound("Lab observation not found")];
+  return [item, null];
  } catch (e) {
   return [null, toError(e)];
  }

@@ -8,6 +8,7 @@ import type { RequestActor } from "@module/auth/helper.ts";
 import {
  findUserByPatientId,
  findUserByPractitionerId,
+ findUserPractitionerId,
 } from "@module/user/helper.ts";
 import { recordEmrAuthor, recordEmrAuthors } from "@module/emr/helper.ts";
 import { notify } from "@module/notification/notification.service.ts";
@@ -25,6 +26,7 @@ export type LabActor = RequestActor;
 
 export const labOrderListQuerySchema = z.object({
  patientId: z.string().optional(),
+ doctorId: z.string().optional(),
  status: z.string().optional(),
 });
 export type LabOrderListQuery = z.infer<typeof labOrderListQuerySchema>;
@@ -44,8 +46,14 @@ export type CreateLabOrderInput = z.infer<typeof labOrderBodySchema>;
 export const labResultListQuerySchema = z.object({
  orderId: z.string().optional(),
  patientId: z.string().optional(),
+ doctorId: z.string().optional(),
 });
 export type LabResultListQuery = z.infer<typeof labResultListQuerySchema>;
+
+export const labResultParamSchema = z.object({
+ resultId: z.string().min(1),
+});
+export type LabResultParam = z.infer<typeof labResultParamSchema>;
 
 export const labResultBodySchema = z.object({
  orderId: z.union([z.string(), z.number()]),
@@ -93,7 +101,20 @@ class LabService {
    }
    if (query.status) params.status = query.status;
 
-   const items = await client.standardGet<LabRecord>("/api/lab_order", params);
+   let providerUuid: string | undefined;
+   if (actor.role !== "patient") {
+    const doctorUserId = query.doctorId ?? (actor.role === "doctor" ? actor.userId : undefined);
+    if (doctorUserId) {
+     const [uuid, derr] = await findUserPractitionerId(doctorUserId);
+     if (derr || !uuid) return [null, derr];
+     providerUuid = uuid;
+    }
+   }
+
+   let items = await client.standardGet<LabRecord>("/api/lab_order", params);
+   if (providerUuid) {
+    items = items.filter((o) => asString(o.provider_uuid) === providerUuid);
+   }
    return [{ total: items.length, items }, null];
   } catch (e) {
    return [null, toError(e)];
@@ -154,8 +175,18 @@ class LabService {
     if (perr || !pid) return [null, perr];
     params.patient_id = pid;
    }
-   if (!params.order_id && !params.patient_id) {
-    return [null, APIError.badRequest("orderId or patientId is required")];
+
+   if (actor.role !== "patient") {
+    const doctorUserId = query.doctorId ?? (actor.role === "doctor" ? actor.userId : undefined);
+    if (doctorUserId) {
+     const [uuid, derr] = await findUserPractitionerId(doctorUserId);
+     if (derr || !uuid) return [null, derr];
+     params.provider_uuid = uuid;
+    }
+   }
+
+   if (!params.order_id && !params.patient_id && !params.provider_uuid) {
+    return [null, APIError.badRequest("orderId, patientId or doctorId is required")];
    }
 
    const items = await client.standardGet<LabRecord>("/api/lab_result", params);
@@ -165,7 +196,29 @@ class LabService {
   }
  };
 
- createResult = async (
+  getResult = async (
+   client: OpenEMRClient,
+   resultId: string,
+   actor: LabActor,
+  ): Promise<Result<LabRecord>> => {
+   try {
+    const params: Record<string, string | number> = { result_uuid: resultId };
+    if (actor.role === "patient") {
+     const [ownId, perr] = await resolveOwnPatientId(actor.userId);
+     if (perr || !ownId) return [null, perr];
+     const [pid, rperr] = await resolvePatientPid(client, ownId);
+     if (rperr || !pid) return [null, rperr];
+     params.patient_id = pid;
+    }
+    const [item] = await client.standardGet<LabRecord>("/api/lab_result", params);
+    if (!item) return [null, APIError.notFound("Lab result not found")];
+    return [item, null];
+   } catch (e) {
+    return [null, toError(e)];
+   }
+  };
+
+  createResult = async (
   client: OpenEMRClient,
   input: CreateLabResultInput,
   actor: LabActor,

@@ -1,5 +1,6 @@
 import APIError from "@error/APIError.ts";
 import logger from "@app/logger.ts";
+import { withTransaction } from "@db/transaction.ts";
 import { provisionOpenEMR } from "@module/openemr/helpers.ts";
 import openemrService from "@module/openemr/openemr.service.ts";
 import {
@@ -112,31 +113,42 @@ class AuthService {
    if (er || !passwordHash) {
     return [null, er];
    }
-   const [user, err] = await createUser({
-    email: input.email,
-    passwordHash,
-    role: input.role,
-    firstName: input.firstName,
-    lastName: input.lastName,
-    clinicId: input.clinicId,
-    openemr: provisioned.link,
-   });
-   if (err || !user) {
-    return [null, err];
-   }
-   if (provisioned.credentials) {
-    const [, credErr] = await saveOpenEMRCredentials(
-     user.id,
-     provisioned.credentials,
+   let auth: AuthResult | undefined;
+   await withTransaction(async (tx) => {
+    const [user, err] = await createUser(
+     {
+      email: input.email,
+      passwordHash,
+      role: input.role,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      clinicId: input.clinicId,
+      openemr: provisioned.link,
+     },
+     tx,
     );
-    if (credErr) {
-     logger.warn(
-      `Failed to store OpenEMR credentials for ${user.email}: ${credErr.message}`,
-     );
+    if (err || !user) {
+     throw err ?? APIError.internalServer("Failed to create user");
     }
-   }
-   const [auth, authErr] = await issueSession(user);
-   if (authErr || !auth) return [null, authErr];
+    if (provisioned.credentials) {
+     const [, credErr] = await saveOpenEMRCredentials(
+      user.id,
+      provisioned.credentials,
+      tx,
+     );
+     if (credErr) {
+      logger.warn(
+       `Failed to store OpenEMR credentials for ${user.email}: ${credErr.message}`,
+      );
+     }
+    }
+    const [issued, authErr] = await issueSession(user, tx);
+    if (authErr || !issued) {
+     throw authErr ?? APIError.internalServer("Failed to issue session");
+    }
+    auth = issued;
+   });
+   if (!auth) return [null, APIError.internalServer("Failed to register user")];
    return [auth, null];
   } catch (e) {
    return [null, toError(e)];
@@ -193,24 +205,38 @@ class AuthService {
  };
 
  refresh = async (input: RefreshTokenInput): Promise<Result<RefreshResult>> => {
-  const [verified, err] = await verifyRefreshToken(input.refreshToken);
-  if (err || !verified) return [null, err];
-  const { userId, createdAt } = verified;
-  if (isIdle(createdAt)) {
-   await revokeUserRefreshTokens(userId);
-   return [
-    null,
-    APIError.unauthorized(
-     "Session expired due to inactivity. Please log in again.",
-    ),
-   ];
+  try {
+   const [verified, err] = await verifyRefreshToken(input.refreshToken);
+   if (err || !verified) return [null, err];
+   const { userId, createdAt } = verified;
+   if (isIdle(createdAt)) {
+    await revokeUserRefreshTokens(userId);
+    return [
+     null,
+     APIError.unauthorized(
+      "Session expired due to inactivity. Please log in again.",
+     ),
+    ];
+   }
+   const [user, findErr] = await findUserById(userId);
+   if (!user) return [null, findErr];
+   let issued: AuthResult | undefined;
+   await withTransaction(async (tx) => {
+    const [, rerr] = await revokeUserRefreshTokens(userId, tx);
+    if (rerr) throw rerr;
+    const [session, ierr] = await issueSession(user, tx);
+    if (ierr || !session) {
+     throw ierr ?? APIError.internalServer("Failed to issue session");
+    }
+    issued = session;
+   });
+   if (!issued) {
+    return [null, APIError.internalServer("Failed to issue session")];
+   }
+   return [{ token: issued.token, refreshToken: issued.refreshToken }, null];
+  } catch (e) {
+   return [null, toError(e)];
   }
-  const [user, findErr] = await findUserById(userId);
-  if (!user) return [null, findErr];
-  await revokeUserRefreshTokens(userId);
-  const [issued, ierr] = await issueSession(user);
-  if (ierr || !issued) return [null, ierr];
-  return [{ token: issued.token, refreshToken: issued.refreshToken }, null];
  };
 
  changePassword = async (
@@ -231,10 +257,14 @@ class AuthService {
    if (herr || !hash) {
     return [null, herr];
    }
-   const [, uerr] = await updatePasswordHash(userId, hash);
-   if (uerr) return [null, uerr];
-   await revokeUserRefreshTokens(userId);
-   await bumpSessionEpoch(userId);
+   await withTransaction(async (tx) => {
+    const [, uerr] = await updatePasswordHash(userId, hash, tx);
+    if (uerr) throw uerr;
+    const [, rerr] = await revokeUserRefreshTokens(userId, tx);
+    if (rerr) throw rerr;
+    const [, eerr] = await bumpSessionEpoch(userId, tx);
+    if (eerr) throw eerr;
+   });
    return [{ success: true }, null];
   } catch (e) {
    return [null, toError(e)];
@@ -263,16 +293,22 @@ class AuthService {
   input: ResetPasswordInput,
  ): Promise<Result<{ success: true }>> => {
   try {
-   const [userId, err] = await consumePasswordResetToken(input.token);
-   if (err || !userId) return [null, err];
    const [hash, herr] = await hashPassword(input.newPassword);
    if (herr || !hash) {
     return [null, herr];
    }
-   const [, uerr] = await updatePasswordHash(userId, hash);
-   if (uerr) return [null, uerr];
-   await revokeUserRefreshTokens(userId);
-   await bumpSessionEpoch(userId);
+   await withTransaction(async (tx) => {
+    const [userId, err] = await consumePasswordResetToken(input.token, tx);
+    if (err || !userId) {
+     throw err ?? APIError.badRequest("Invalid or expired reset token");
+    }
+    const [, uerr] = await updatePasswordHash(userId, hash, tx);
+    if (uerr) throw uerr;
+    const [, rerr] = await revokeUserRefreshTokens(userId, tx);
+    if (rerr) throw rerr;
+    const [, eerr] = await bumpSessionEpoch(userId, tx);
+    if (eerr) throw eerr;
+   });
    return [{ success: true }, null];
   } catch (e) {
    return [null, toError(e)];
@@ -280,13 +316,19 @@ class AuthService {
  };
 
  logout = async (userId: string): Promise<Result<LogoutResult>> => {
-  const [, rerr] = await revokeUserRefreshTokens(userId);
-  if (rerr) return [null, rerr];
-  const [, eerr] = await bumpSessionEpoch(userId);
-  if (eerr) return [null, eerr];
-  const [, err] = await clearAccessToken(userId);
-  if (err) return [null, err];
-  return [{ success: true }, null];
+  try {
+   await withTransaction(async (tx) => {
+    const [, rerr] = await revokeUserRefreshTokens(userId, tx);
+    if (rerr) throw rerr;
+    const [, eerr] = await bumpSessionEpoch(userId, tx);
+    if (eerr) throw eerr;
+    const [, err] = await clearAccessToken(userId, tx);
+    if (err) throw err;
+   });
+   return [{ success: true }, null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
  };
 }
 

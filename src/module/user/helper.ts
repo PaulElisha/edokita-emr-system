@@ -1,4 +1,4 @@
-import { db } from "@db/db.ts";
+import { db as defaultDb } from "@db/db.ts";
 import type { DbClient } from "@db/transaction.ts";
 import { roles, roleSchema, type UserRole } from "@db/schema/role.ts";
 import { users } from "@db/schema/user.ts";
@@ -88,7 +88,10 @@ export function toPublicUser(user: User): PublicUser {
  return publicUser;
 }
 
-export async function findUserByEmail(email: string): Promise<Result<User>> {
+export async function findUserByEmail(
+ email: string,
+ db: DbClient = defaultDb,
+): Promise<Result<User>> {
  const [row] = await db
   .select({ user: users, role: roles.name })
   .from(users)
@@ -103,9 +106,9 @@ export async function findUserByEmail(email: string): Promise<Result<User>> {
 
 export async function findUserById(
  id: string,
- client: DbClient = db,
+ db: DbClient = defaultDb,
 ): Promise<Result<User>> {
- const [row] = await client
+ const [row] = await db
   .select({ user: users, role: roles.name })
   .from(users)
   .innerJoin(roles, eq(users.roleId, roles.id))
@@ -120,7 +123,7 @@ export async function findUserById(
 export async function findUserByPatientId(
  patientId: string,
 ): Promise<Result<User>> {
- const [row] = await db
+ const [row] = await defaultDb
   .select({ user: users, role: roles.name })
   .from(users)
   .innerJoin(roles, eq(users.roleId, roles.id))
@@ -133,7 +136,7 @@ export async function findUserByPatientId(
 export async function findUserByPractitionerId(
  practitionerId: string,
 ): Promise<Result<User>> {
- const [row] = await db
+ const [row] = await defaultDb
   .select({ user: users, role: roles.name })
   .from(users)
   .innerJoin(roles, eq(users.roleId, roles.id))
@@ -148,7 +151,7 @@ export async function findUserNamesByPractitionerIds(
 ): Promise<Map<string, string>> {
  const unique = [...new Set(ids.filter((id): id is string => Boolean(id)))];
  if (unique.length === 0) return new Map();
- const rows = await db
+ const rows = await defaultDb
   .select({
    practitionerId: users.openemrPractitionerId,
    firstName: users.firstName,
@@ -187,9 +190,10 @@ export async function findUserPractitionerId(
 
 export async function createUser(
  input: CreateUserInput,
+ db: DbClient = defaultDb,
 ): Promise<Result<User>> {
  const email = input.email.toLowerCase();
- const [existing] = await findUserByEmail(email);
+ const [existing] = await findUserByEmail(email, db);
  if (existing) {
   return [null, APIError.conflict("A user with this email already exists")];
  }
@@ -225,7 +229,7 @@ export async function createUser(
 export async function linkOpenEMR(
  id: string,
  link: OpenEMRLinkUpdate,
- client: DbClient = db,
+ db: DbClient = defaultDb,
 ): Promise<Result<User>> {
  const patch: Partial<UserRow> = {};
  const set = setDefined(patch);
@@ -233,7 +237,7 @@ export async function linkOpenEMR(
  set("openemrFhirUser", link.fhirUser);
  set("openemrPatientId", link.patientId);
  set("openemrPractitionerId", link.practitionerId);
- return applyUserPatch(id, patch, client);
+ return applyUserPatch(id, patch, db);
 }
 
 export async function updateUser(
@@ -251,6 +255,7 @@ export async function updateUser(
 export async function updatePasswordHash(
  id: string,
  passwordHash: string,
+ db: DbClient = defaultDb,
 ): Promise<Result<void>> {
  const [row] = await db
   .update(users)
@@ -261,7 +266,10 @@ export async function updatePasswordHash(
  return [undefined, null];
 }
 
-export async function bumpSessionEpoch(id: string): Promise<Result<void>> {
+export async function bumpSessionEpoch(
+ id: string,
+ db: DbClient = defaultDb,
+): Promise<Result<void>> {
  const [row] = await db
   .update(users)
   .set({ sessionEpoch: sql`${users.sessionEpoch} + 1` })
@@ -274,11 +282,11 @@ export async function bumpSessionEpoch(id: string): Promise<Result<void>> {
 export async function saveOpenEMRCredentials(
  id: string,
  credentials: OpenEMRCredentials,
- client: DbClient = db,
+ db: DbClient = defaultDb,
  ): Promise<Result<void>> {
   try {
    const encrypted = await encryptSecret(credentials.password);
-   const [row] = await client
+   const [row] = await db
     .update(users)
     .set({
      openemrUsername: credentials.username,
@@ -296,7 +304,7 @@ export async function saveOpenEMRCredentials(
 export async function getOpenEMRCredentials(
  id: string,
 ): Promise<Result<OpenEMRCredentials>> {
- const [row] = await db
+ const [row] = await defaultDb
   .select({
    username: users.openemrUsername,
    password: users.openemrPassword,
@@ -317,11 +325,11 @@ export async function getOpenEMRCredentials(
 async function applyUserPatch(
  id: string,
  patch: Partial<UserRow>,
- client: DbClient = db,
+ db: DbClient = defaultDb,
 ): Promise<Result<User>> {
- if (Object.keys(patch).length === 0) return findUserById(id, client);
+ if (Object.keys(patch).length === 0) return findUserById(id, db);
 
- const [row] = await client
+ const [row] = await db
   .update(users)
   .set(patch)
   .where(eq(users.id, id))
@@ -329,5 +337,5 @@ async function applyUserPatch(
 
  if (!row) return [null, APIError.notFound("User not found")];
 
- return findUserById(id, client);
+ return findUserById(id, db);
 }

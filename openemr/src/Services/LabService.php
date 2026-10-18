@@ -171,12 +171,14 @@ class LabService
 
         $orderId = $this->resolveOrderId($search);
         $patientId = $this->resolvePatientId($search);
+        $resultId = $this->resolveResultId($search);
+        $providerId = $this->resolveProviderId($search);
         if ($patientId === false) {
             $result->setValidationMessages(['patient' => ['The patient is invalid.']]);
             return $result;
         }
-        if (!$orderId && !$patientId) {
-            $result->setValidationMessages(['order_id' => ['An order or patient is required.']]);
+        if (!$orderId && !$patientId && !$resultId && !$providerId) {
+            $result->setValidationMessages(['order_id' => ['An order, patient, result or provider is required.']]);
             return $result;
         }
 
@@ -190,19 +192,30 @@ class LabService
             $where[] = 'po.patient_id = ?';
             $binds[] = $patientId;
         }
+        if ($resultId) {
+            $where[] = 'pr.procedure_result_id = ?';
+            $binds[] = $resultId;
+        }
+        if ($providerId) {
+            $where[] = 'po.provider_id = ?';
+            $binds[] = $providerId;
+        }
 
         $sql = "SELECT pr.procedure_result_id, pr.uuid, pr.result_code, pr.result_text, "
             . "pr.result, pr.units, pr.range, pr.abnormal, pr.result_status, pr.date, pr.comments, "
             . "preport.procedure_report_id, preport.procedure_order_id, preport.date_report, "
-            . "preport.report_status, preport.review_status, po.patient_id "
+            . "preport.report_status, preport.review_status, po.patient_id, po.provider_id, "
+            . "prov.uuid AS provider_uuid "
             . "FROM procedure_result AS pr "
             . "JOIN procedure_report AS preport ON preport.procedure_report_id = pr.procedure_report_id "
             . "JOIN procedure_order AS po ON po.procedure_order_id = preport.procedure_order_id "
+            . "LEFT JOIN users AS prov ON prov.id = po.provider_id "
             . "WHERE " . implode(' AND ', $where) . " "
             . "ORDER BY preport.date_report DESC, pr.procedure_result_id";
 
         foreach (QueryUtils::fetchRecords($sql, $binds) as $row) {
             $row['result_uuid'] = $this->uuidToString($row['uuid'] ?? null);
+            $row['provider_uuid'] = $this->uuidToString($row['provider_uuid'] ?? null);
             unset($row['uuid']);
             $result->addData($row);
         }
@@ -393,6 +406,24 @@ class LabService
             $found = QueryUtils::fetchSingleValue(
                 "SELECT procedure_order_id FROM procedure_order WHERE uuid = ?",
                 'procedure_order_id',
+                [UuidRegistry::uuidToBytes((string)$uuid)]
+            );
+            return $found === null ? 0 : (int)$found;
+        }
+        return 0;
+    }
+
+    private function resolveResultId(array $data): int
+    {
+        $id = $data['result_id'] ?? null;
+        if ($id !== null && $id !== '') {
+            return (int)$id;
+        }
+        $uuid = $data['result_uuid'] ?? null;
+        if ($uuid !== null && $uuid !== '') {
+            $found = QueryUtils::fetchSingleValue(
+                "SELECT procedure_result_id FROM procedure_result WHERE uuid = ?",
+                'procedure_result_id',
                 [UuidRegistry::uuidToBytes((string)$uuid)]
             );
             return $found === null ? 0 : (int)$found;

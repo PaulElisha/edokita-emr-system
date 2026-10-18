@@ -1,5 +1,8 @@
+/** @format */
+
 import { z } from "zod";
 import { db } from "@db/db.ts";
+import { withTransaction } from "@db/transaction.ts";
 import { providerSchedules } from "@db/schema/appointment.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
@@ -30,13 +33,13 @@ export const scheduleBodySchema = z.object({
 });
 export type UpdateScheduleInput = z.infer<typeof scheduleBodySchema>;
 
-export const practitionerParamSchema = z.object({ practitionerId: z.string().min(1) });
+export const practitionerParamSchema = z.object({
+ practitionerId: z.string().min(1),
+});
 export type PractitionerParam = z.infer<typeof practitionerParamSchema>;
 
 class ScheduleService {
- list = async (
-  practitionerId: string,
- ): Promise<Result<ScheduleEntry[]>> => {
+ list = async (practitionerId: string): Promise<Result<ScheduleEntry[]>> => {
   try {
    const rows = await db
     .select()
@@ -53,7 +56,7 @@ class ScheduleService {
   input: UpdateScheduleInput,
  ): Promise<Result<ScheduleEntry[]>> => {
   try {
-   await db.transaction(async (tx) => {
+   await withTransaction(async (tx) => {
     await tx
      .delete(providerSchedules)
      .where(eq(providerSchedules.practitionerId, practitionerId));

@@ -7,6 +7,7 @@ export interface ContactPoint {
 export const IDENTIFIER_SYSTEM = {
  npi: "http://hl7.org/fhir/sid/us-npi",
  stateLicense: "urn:oid:2.16.840.1.113883.4.3.1",
+ patientPid: "http://terminology.hl7.org/CodeSystem/v2-0203",
 } as const;
 
 export interface HumanNameOptions {

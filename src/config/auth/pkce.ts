@@ -1,3 +1,5 @@
+/** @format */
+
 import {
  calculatePKCECodeChallenge,
  generateRandomCodeVerifier,

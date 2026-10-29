@@ -1,5 +1,7 @@
+/** @format */
+
 import { OpenEMR } from "@/env.ts";
-import { getAccessToken } from "@shared/utils/openemr-auth.ts";
+import { getAccessToken } from "./service.config.ts";
 import type { FhirBundle, FhirResource } from "@shared/types/fhir.ts";
 import AppError from "@error/app-error.ts";
 import type { HttpStatusCodeType } from "@enum/http.ts";

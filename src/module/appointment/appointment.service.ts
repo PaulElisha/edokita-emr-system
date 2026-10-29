@@ -1,35 +1,34 @@
 /** @format */
 
+import { getOpenEMRClient, runWithOpenEMR } from "@openemr/context.ts";
+
 import { z } from "zod";
 import APIError from "@error/APIError.ts";
 import {
  mapAppointment,
  type MappedAppointment,
 } from "@shared/utils/fhir-mapper.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
-import { openemr } from "@module/openemr/client.ts";
+import { openemr } from "../../config/openemr-client/client.ts";
 import { countParam } from "@shared/schemas/common.ts";
 import {
  appointmentSearchScope,
  appointmentWindow,
  APPOINTMENT_FETCH_CAP,
- assertAppointmentAccess,
  assertNoConflict,
  buildAppointmentPayload,
- computeSlots,
  fallbackAppointment,
  findAppointment,
- listCategories,
- resolvePatientId,
  resolveProviderId,
  type AppointmentBooking,
+} from "@module/appointment/helper.ts";
+import {
+ AppointmentBase,
  type AppointmentCategory,
  type Slot,
-} from "@module/appointment/helper.ts";
-import type { RequestActor } from "@module/auth/helper.ts";
+} from "@module/appointment/appointment.base.ts";
+import type { PublicUser } from "@module/user/helper.ts";
 import {
  applyOverride,
- applyOverrideById,
  applyOverrides,
  removeOverride,
  upsertOverride,
@@ -39,19 +38,33 @@ import type { FhirAppointment } from "@shared/types/fhir.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { setDefined } from "@shared/utils/object.ts";
-import { resolvePatientPid } from "@module/patient/helper.ts";
+
+const appointmentStatusSchema = z.enum([
+ "proposed",
+ "pending",
+ "awaiting-payment",
+ "booked",
+ "rescheduled",
+ "arrived",
+ "fulfilled",
+ "cancelled",
+ "noshow",
+ "entered-in-error",
+ "checked-in",
+ "waitlist",
+]);
+export type AppointmentStatus = z.infer<typeof appointmentStatusSchema>;
 
 export const appointmentListQuerySchema = z.object({
  patient: z.string().optional(),
  practitioner: z.string().optional(),
  date: z.string().optional(),
- status: z.string().optional(),
+ status: appointmentStatusSchema.optional(),
  _count: countParam.default(100),
 });
 export type AppointmentListQuery = z.infer<typeof appointmentListQuerySchema>;
 
 const appointmentBaseSchema = z.object({
- patientId: z.string().min(1).optional(),
  doctorId: z.string().min(1),
  start: z.string().min(1),
  end: z.string().optional(),
@@ -69,12 +82,7 @@ export const appointmentBodySchema = appointmentBaseSchema.refine(
 );
 export type CreateAppointmentInput = z.infer<typeof appointmentBodySchema>;
 
-export const appointmentPatientSchema = appointmentBaseSchema.pick({
- patientId: true,
-});
-export type AppointmentPatientInput = z.infer<typeof appointmentPatientSchema>;
-
-export const appointmentWindowSchema = appointmentBaseSchema.pick({
+const appointmentWindowSchema = appointmentBaseSchema.pick({
  start: true,
  end: true,
  durationMinutes: true,
@@ -87,20 +95,6 @@ export const slotsQuerySchema = z.object({
  slotMinutes: z.coerce.number().int().min(5).max(240).optional(),
 });
 export type SlotsQuery = z.infer<typeof slotsQuerySchema>;
-
-export const appointmentStatusSchema = z.enum([
- "proposed",
- "pending",
- "booked",
- "arrived",
- "fulfilled",
- "cancelled",
- "noshow",
- "entered-in-error",
- "checked-in",
- "waitlist",
-]);
-export type AppointmentStatus = z.infer<typeof appointmentStatusSchema>;
 
 export const appointmentUpdateSchema = z
  .object({
@@ -115,16 +109,26 @@ export const appointmentUpdateSchema = z
  });
 export type UpdateAppointmentInput = z.infer<typeof appointmentUpdateSchema>;
 
-export type AppointmentListResult = ListResult<MappedAppointment>;
+export const appointmentRescheduleSchema = z.object({
+ start: z.string().min(1),
+ end: z.string().optional(),
+ durationMinutes: z.coerce.number().int().min(5).max(600).optional(),
+ note: z.string().optional(),
+});
+export type RescheduleAppointmentInput = z.infer<
+ typeof appointmentRescheduleSchema
+>;
+
+type AppointmentListResult = ListResult<MappedAppointment>;
 
 class AppointmentService {
  getAppointments = async (
-  client: OpenEMRClient,
   query: AppointmentListQuery,
-  actor: RequestActor,
+  user: PublicUser,
  ): Promise<Result<AppointmentListResult>> => {
+  const client = getOpenEMRClient();
   try {
-   const [scope, serr] = await appointmentSearchScope(query, actor);
+   const [scope, serr] = await appointmentSearchScope(query, user);
    if (serr || !scope) return [null, serr];
 
    const bundle = await client.fhirSearch("Appointment", {
@@ -154,84 +158,126 @@ class AppointmentService {
   }
  };
 
- getAppointment = async (
-  client: OpenEMRClient,
-  id: string,
-  actor: RequestActor,
- ): Promise<Result<MappedAppointment>> => {
-  try {
-   const appointment = await client.fhirRead<FhirAppointment>(
-    "Appointment",
-    id,
-   );
-   const mapped = mapAppointment(appointment);
-   const [, accessErr] = await assertAppointmentAccess(mapped, actor);
-   if (accessErr) return [null, accessErr];
-   return applyOverrideById(mapped);
-  } catch (e) {
-   return [null, toError(e)];
-  }
+ getAppointment = (id: string) => {
+  return AppointmentBase.loadAppointment(id);
  };
 
  updateAppointment = async (
-  client: OpenEMRClient,
   id: string,
   input: UpdateAppointmentInput,
-  actor: RequestActor,
+  userId: string,
  ): Promise<Result<MappedAppointment>> => {
   try {
-   const appointment = await client.fhirRead<FhirAppointment>(
-    "Appointment",
-    id,
-   );
-   const mapped = mapAppointment(appointment);
-   const [, accessErr] = await assertAppointmentAccess(mapped, actor);
-   if (accessErr) return [null, accessErr];
+   const [appointment, loadErr] = await AppointmentBase.loadAppointment(id);
+   if (loadErr || !appointment) return [null, loadErr];
 
    const override: OverrideInput = {};
    const set = setDefined(override);
    set("status", input.status);
    set("note", input.note);
    if (input.start) {
-    const window = appointmentWindow({
-     start: input.start,
-     end: input.end,
-     durationMinutes: input.durationMinutes,
-    });
-    override.start = new Date(window.start);
-    override.end = new Date(window.end);
+    const [window, rescheduleErr] = await AppointmentBase.prepareReschedule(
+     appointment,
+     {
+      start: input.start,
+      end: input.end,
+      durationMinutes: input.durationMinutes,
+     },
+    );
+    if (rescheduleErr || !window) return [null, rescheduleErr];
+    override.start = window.start;
+    override.end = window.end;
+    if (!input.status) override.status = "rescheduled";
    }
 
-   const [row, err] = await upsertOverride(id, override, actor.userId);
+   const [row, err] = await upsertOverride(id, override, userId);
    if (err || !row) return [null, err];
 
-   return [applyOverride(mapped, row), null];
+   return [applyOverride(appointment, row), null];
   } catch (e) {
    return [null, toError(e)];
   }
  };
 
- remove = async (
-  client: OpenEMRClient,
+ accept = async (
   id: string,
-  actor: RequestActor,
- ): Promise<Result<{ success: true }>> => {
-  try {
-   const appointment = await client.fhirRead<FhirAppointment>(
-    "Appointment",
-    id,
-   );
-   const mapped = mapAppointment(appointment);
-   const [, accessErr] = await assertAppointmentAccess(mapped, actor);
-   if (accessErr) return [null, accessErr];
-   if (!mapped.patientId) {
-    return [null, APIError.badRequest("Appointment has no patient")];
-   }
+  userId: string,
+ ): Promise<Result<MappedAppointment>> => {
+  const [appointment, err] = await AppointmentBase.loadAppointment(id);
+  if (err || !appointment) return [null, err];
+  return AppointmentBase.setStatus(appointment, "awaiting-payment", userId);
+ };
 
-   const [pid, pe] = await resolvePatientPid(client, mapped.patientId);
-   if (pe || !pid) {
-    return [null, pe];
-   }
+ confirm = async (
+  id: string,
+  userId: string,
+ ): Promise<Result<MappedAppointment>> => {
+  const [appointment, err] = await AppointmentBase.loadAppointment(id);
+  if (err || !appointment) return [null, err];
+  return AppointmentBase.setStatus(appointment, "booked", userId);
+ };
+
+ reschedule = async (
+  id: string,
+  input: RescheduleAppointmentInput,
+  userId: string,
+ ): Promise<Result<MappedAppointment>> => {
+  try {
+   const [appointment, loadErr] = await AppointmentBase.loadAppointment(id);
+   if (loadErr || !appointment) return [null, loadErr];
+
+   const [window, windowErr] = await AppointmentBase.prepareReschedule(
+    appointment,
+    input,
+   );
+   if (windowErr || !window) return [null, windowErr];
+
+   const [row, err] = await upsertOverride(
+    id,
+    {
+     status: "rescheduled",
+     start: window.start,
+     end: window.end,
+     note: input.note,
+    },
+    userId,
+   );
+   if (err || !row) return [null, err];
+
+   return [applyOverride(appointment, row), null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ done = async (
+  id: string,
+  userId: string,
+ ): Promise<Result<MappedAppointment>> => {
+  const [appointment, err] = await AppointmentBase.loadAppointment(id);
+  if (err || !appointment) return [null, err];
+  return AppointmentBase.setStatus(appointment, "fulfilled", userId);
+ };
+
+ cancel = async (
+  id: string,
+  userId: string,
+ ): Promise<Result<MappedAppointment>> => {
+  const [appointment, err] = await AppointmentBase.loadAppointment(id);
+  if (err || !appointment) return [null, err];
+  return AppointmentBase.setStatus(appointment, "cancelled", userId);
+ };
+
+ remove = async (
+  id: string,
+  user: PublicUser,
+ ): Promise<Result<{ success: true }>> => {
+  const client = getOpenEMRClient();
+  try {
+   const [appointment, loadErr] = await AppointmentBase.loadAppointment(id);
+   if (loadErr || !appointment) return [null, loadErr];
+   const patientId = (appointment.patientId ?? user.openemr.patientId)!;
+   const pid = user.openemr.patientPid ?? patientId;
 
    const rows = await client.standardGet<{
     pc_eid?: string | number;
@@ -253,22 +299,22 @@ class AppointmentService {
  };
 
  create = async (
-  client: OpenEMRClient,
   input: CreateAppointmentInput,
-  actor: RequestActor,
+  user: PublicUser,
  ): Promise<Result<MappedAppointment>> => {
+  const client = getOpenEMRClient();
   try {
-   const [patientId, err] = await resolvePatientId(client, input, actor);
-   if (err || !patientId) return [null, err];
+   const patientId = user.openemr.patientId;
+   if (!patientId) {
+    return [null, APIError.badRequest("Patient profile is not linked")];
+   }
+   const pid = user.openemr.patientPid ?? patientId;
 
    const window = appointmentWindow(input);
-   const [[pid, pe], [providerId, providerErr], [, conflict]] =
-    await Promise.all([
-     resolvePatientPid(client, patientId),
-     resolveProviderId(openemr, input.doctorId),
-     assertNoConflict(client, input.doctorId, window),
-    ]);
-   if (pe || !pid) return [null, pe];
+   const [[providerId, providerErr], [, conflict]] = await Promise.all([
+    runWithOpenEMR(openemr, () => resolveProviderId(input.doctorId)),
+    assertNoConflict(input.doctorId, window),
+   ]);
    if (providerErr || !providerId) return [null, providerErr];
    if (conflict) return [null, conflict];
 
@@ -280,19 +326,28 @@ class AppointmentService {
    const eid = created?.id != null ? String(created.id) : undefined;
    if (!eid) return [fallbackAppointment(input, booking), null];
 
-   const [appointment, ex] = await findAppointment(client, eid);
+   const [appointment, ex] = await findAppointment(eid);
    if (ex || !appointment) return [fallbackAppointment(input, booking), null];
-   return [appointment, null];
+   if (!appointment.id) return [appointment, null];
+
+   const [row, overrideErr] = await upsertOverride(
+    appointment.id,
+    { status: "pending" },
+    user.id,
+   );
+   if (overrideErr || !row) return [null, overrideErr];
+   return [applyOverride(appointment, row), null];
   } catch (e) {
    return [null, toError(e)];
   }
  };
 
  categories = (): Promise<Result<AppointmentCategory[]>> =>
-  listCategories(openemr);
+  runWithOpenEMR(openemr, () => AppointmentBase.listCategories());
 
- slots = (client: OpenEMRClient, query: SlotsQuery): Promise<Result<Slot[]>> =>
-  computeSlots(client, query);
+ slots = (query: SlotsQuery): Promise<Result<Slot[]>> => {
+  return AppointmentBase.computeSlots(query);
+ };
 }
 
 export default new AppointmentService();

@@ -1,14 +1,13 @@
-import { getTokens } from "@module/auth/helper.ts";
+import { getTokens } from "@openemr/utils.ts";
 import type { Result } from "@shared/types.ts";
 import {
  findUserById,
- toPublicUser,
  updateUser,
  type PublicUser,
  type UpdateUserInput,
 } from "./helper.ts";
 
-export interface UserProfile {
+interface UserProfile {
  user: PublicUser;
  openemr: {
   connected: boolean;
@@ -22,13 +21,12 @@ class UserService {
   const [user, err] = await findUserById(userId);
   if (err || !user) return [null, err];
   const [tokens] = await getTokens(userId);
-  const connected =
-   user.role === "patient"
-    ? Boolean(user.openemr.patientId)
-    : Boolean(tokens?.accessToken && tokens.expiresAt.getTime() > Date.now());
+  const connected = user.openemr.patientId
+   ? true
+   : Boolean(tokens?.accessToken && tokens.expiresAt.getTime() > Date.now());
   return [
    {
-    user: toPublicUser(user),
+    user,
     openemr: {
      connected,
      expiresAt: connected && tokens ? tokens.expiresAt : null,

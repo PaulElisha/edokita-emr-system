@@ -11,7 +11,7 @@ const opts: Options = {
  algorithm: 2, // Argon2id
 };
 
-export const verifyPasswordSchema = z.object({
+const verifyPasswordSchema = z.object({
  password: z.string(),
  hash: z.string(),
 });

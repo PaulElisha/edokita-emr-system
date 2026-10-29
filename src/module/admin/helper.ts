@@ -1,12 +1,15 @@
-import type OpenEMRClient from "@module/openemr/client.ts";
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 
 export async function countResources(
- client: OpenEMRClient,
  resourceType: string,
  params: Record<string, string | number> = {},
 ): Promise<Result<number>> {
+ const client = getOpenEMRClient();
  try {
   const bundle = await client.fhirSearch(resourceType, {
    ...params,

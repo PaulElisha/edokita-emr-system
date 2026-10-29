@@ -11,5 +11,3 @@ export const requireRole =
   }
   next();
  };
-
-export default requireRole;

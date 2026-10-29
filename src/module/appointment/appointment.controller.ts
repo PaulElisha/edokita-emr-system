@@ -1,97 +1,133 @@
-import asyncHandler from "@middleware/async-handler.ts";
+/** @format */
+
+import AsyncHandler from "@middleware/async-handler.ts";
 import type { IdParam } from "@shared/schemas/params.ts";
 import type { OpenEMRRequest } from "@shared/http.ts";
-import { actor } from "@module/auth/helper.ts";
 import type { Request, Response } from "express";
 import AppointmentService, {
  type AppointmentListQuery,
  type CreateAppointmentInput,
+ type RescheduleAppointmentInput,
  type SlotsQuery,
  type UpdateAppointmentInput,
 } from "@module/appointment/appointment.service.ts";
 
 class AppointmentController {
- getAppointments = asyncHandler(
+ getAppointments = AsyncHandler(
   async (
    req: OpenEMRRequest<unknown, unknown, unknown, AppointmentListQuery>,
    res: Response,
   ) => {
    const [data, err] = await AppointmentService.getAppointments(
-    req.openemr,
     req.query,
-    actor(req),
+    req.user,
    );
    if (err) throw err;
    res.json({ success: true, data });
   },
  );
 
- categories = asyncHandler(async (_req: Request, res: Response) => {
+ categories = AsyncHandler(async (_req: Request, res: Response) => {
   const [data, err] = await AppointmentService.categories();
   if (err) throw err;
   res.json({ success: true, data });
  });
 
- slots = asyncHandler(
+ slots = AsyncHandler(
   async (
    req: OpenEMRRequest<unknown, unknown, unknown, SlotsQuery>,
    res: Response,
   ) => {
-   const [data, err] = await AppointmentService.slots(req.openemr, req.query);
+   const [data, err] = await AppointmentService.slots(req.query);
    if (err) throw err;
    res.json({ success: true, data });
   },
  );
 
- getAppointment = asyncHandler(
+ getAppointment = AsyncHandler(
   async (req: OpenEMRRequest<IdParam>, res: Response) => {
-   const [data, err] = await AppointmentService.getAppointment(
-    req.openemr,
-    req.params.id,
-    actor(req),
-   );
+   const [data, err] = await AppointmentService.getAppointment(req.params.id);
    if (err) throw err;
    res.json({ success: true, data });
   },
  );
 
- create = asyncHandler(
+ create = AsyncHandler(
   async (
    req: OpenEMRRequest<unknown, unknown, CreateAppointmentInput>,
    res: Response,
   ) => {
-   const [data, err] = await AppointmentService.create(
-    req.openemr,
-    req.body,
-    actor(req),
-   );
+   const [data, err] = await AppointmentService.create(req.body, req.user);
    if (err) throw err;
    res.status(201).json({ success: true, data });
   },
  );
 
- updateAppointment = asyncHandler(
+ updateAppointment = AsyncHandler(
   async (
    req: OpenEMRRequest<IdParam, unknown, UpdateAppointmentInput>,
    res: Response,
   ) => {
    const [data, err] = await AppointmentService.updateAppointment(
-    req.openemr,
     req.params.id,
     req.body,
-    actor(req),
+    req.user.id,
    );
    if (err) throw err;
    res.json({ success: true, data });
   },
  );
 
- remove = asyncHandler(async (req: OpenEMRRequest<IdParam>, res: Response) => {
-  const [data, err] = await AppointmentService.remove(
-   req.openemr,
+ accept = AsyncHandler(async (req: OpenEMRRequest<IdParam>, res: Response) => {
+  const [data, err] = await AppointmentService.accept(
    req.params.id,
-   actor(req),
+   req.user.id,
   );
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
+
+ confirm = AsyncHandler(async (req: OpenEMRRequest<IdParam>, res: Response) => {
+  const [data, err] = await AppointmentService.confirm(
+   req.params.id,
+   req.user.id,
+  );
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
+
+ reschedule = AsyncHandler(
+  async (
+   req: OpenEMRRequest<IdParam, unknown, RescheduleAppointmentInput>,
+   res: Response,
+  ) => {
+   const [data, err] = await AppointmentService.reschedule(
+    req.params.id,
+    req.body,
+    req.user.id,
+   );
+   if (err) throw err;
+   res.json({ success: true, data });
+  },
+ );
+
+ done = AsyncHandler(async (req: OpenEMRRequest<IdParam>, res: Response) => {
+  const [data, err] = await AppointmentService.done(req.params.id, req.user.id);
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
+
+ cancel = AsyncHandler(async (req: OpenEMRRequest<IdParam>, res: Response) => {
+  const [data, err] = await AppointmentService.cancel(
+   req.params.id,
+   req.user.id,
+  );
+  if (err) throw err;
+  res.json({ success: true, data });
+ });
+
+ remove = AsyncHandler(async (req: OpenEMRRequest<IdParam>, res: Response) => {
+  const [data, err] = await AppointmentService.remove(req.params.id, req.user);
   if (err) throw err;
   res.json({ success: true, data });
  });

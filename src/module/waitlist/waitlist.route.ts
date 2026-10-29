@@ -1,4 +1,5 @@
 import { authenticate } from "@middleware/auth.ts";
+import { requirePatientScope } from "@middleware/patient-scope.ts";
 import { requireRole } from "@middleware/role-guard.ts";
 import validate from "@middleware/validation.ts";
 import WaitlistController from "@module/waitlist/waitlist.controller.ts";
@@ -7,6 +8,7 @@ import {
  waitlistQuerySchema,
 } from "@module/waitlist/waitlist.service.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class WaitlistRouter {
@@ -18,7 +20,7 @@ class WaitlistRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate);
+  this.router.use(authenticate, validate(authUserSchema, "user"));
 
   this.router.get(
    "/",
@@ -30,6 +32,7 @@ class WaitlistRouter {
    "/",
    requireRole("admin", "doctor", "patient"),
    validate(waitlistBodySchema),
+   requirePatientScope("body"),
    WaitlistController.create,
   );
   this.router.delete(

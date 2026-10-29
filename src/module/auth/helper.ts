@@ -1,3 +1,5 @@
+/** @format */
+
 import { db as defaultDb } from "@db/db.ts";
 import type { DbClient } from "@db/transaction.ts";
 import { openemrAuthStates, openemrTokens } from "@db/schema/openemr.ts";
@@ -7,7 +9,6 @@ import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { decodeJwtPayload, signAppToken, type JwtPayload } from "@auth/jwt.ts";
 import type { PublicUser, User } from "@module/user/helper.ts";
-import { toPublicUser } from "@module/user/helper.ts";
 import {
  authorizationServer,
  getClientAuth,
@@ -29,6 +30,7 @@ export interface OpenEMRTokenSet {
  userId: string;
  accessToken: string;
  refreshToken: string | null;
+ refreshExpiresAt: Date | null;
  expiresAt: Date;
  scope: string | null;
  subject: string | null;
@@ -49,6 +51,7 @@ const PENDING_TTL_MS = 10 * 60 * 1000;
 export interface TokenResponse {
  access_token?: string;
  refresh_token?: string;
+ refresh_token_expires_in?: number;
  id_token?: string;
  expires_in?: number;
  scope?: string;
@@ -56,30 +59,6 @@ export interface TokenResponse {
  error_description?: string;
 }
 const SKEW_MS = 30_000;
-
-export async function saveTokens(
- userId: string,
- tokens: SaveTokenInput,
- db: DbClient = defaultDb,
-): Promise<Result<void>> {
- try {
-  const values = {
-   accessToken: tokens.accessToken,
-   refreshToken: tokens.refreshToken,
-   expiresAt: tokens.expiresAt,
-   scope: tokens.scope,
-   subject: tokens.subject,
-   updatedAt: new Date(),
-  };
-  await db
-   .insert(openemrTokens)
-   .values({ userId, ...values })
-   .onConflictDoUpdate({ target: openemrTokens.userId, set: values });
-  return [undefined, null];
- } catch (e) {
-  return [null, toError(e)];
- }
-}
 
 export async function tokenRequest(
  body: URLSearchParams,
@@ -107,6 +86,9 @@ export async function tokenRequest(
    {
     access_token: data.access_token,
     refresh_token: data.refresh_token,
+    refresh_token_expires_in: data.refresh_token_expires_in as
+     | number
+     | undefined,
     id_token: data.id_token,
     expires_in: data.expires_in,
     scope: data.scope,
@@ -133,7 +115,7 @@ export interface IdTokenClaims {
 }
 
 export function decodeIdTokenClaims(idToken?: string): Result<IdTokenClaims> {
- const json = decodeJwtPayload(idToken);
+ const json = decodeJwtPayload(idToken ?? "");
  return [
   {
    subject: typeof json?.sub === "string" ? json.sub : null,
@@ -143,7 +125,7 @@ export function decodeIdTokenClaims(idToken?: string): Result<IdTokenClaims> {
  ];
 }
 
-export function cleanScope(scope: string | null | undefined): string | null {
+function cleanScope(scope: string | null | undefined): string | null {
  if (!scope) return null;
  const cleaned = scope
   .split(/\s+/)
@@ -152,92 +134,39 @@ export function cleanScope(scope: string | null | undefined): string | null {
  return cleaned.length > 0 ? cleaned : null;
 }
 
-export function toTokenSet(data: TokenResponse): Result<SaveTokenInput> {
+const OPENEMR_REFRESH_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+function refreshTtlMs(expiresIn?: number): number {
+ return expiresIn && expiresIn > 0 ? expiresIn * 1000 : OPENEMR_REFRESH_TTL_MS;
+}
+
+export function toTokenSet(
+ data: TokenResponse,
+ previous?: Pick<OpenEMRTokenSet, "refreshToken" | "refreshExpiresAt">,
+): Result<SaveTokenInput> {
  const [claims, err] = decodeIdTokenClaims(data.id_token);
  if (err || !claims) {
   return [null, err];
  }
  const ttlMs = (data.expires_in ?? 3600) * 1000;
+ const rotated = typeof data.refresh_token === "string";
+ const refreshToken = data.refresh_token ?? previous?.refreshToken ?? null;
+ const refreshExpiresAt = !refreshToken
+  ? null
+  : rotated
+    ? new Date(Date.now() + refreshTtlMs(data.refresh_token_expires_in))
+    : (previous?.refreshExpiresAt ?? new Date(Date.now() + refreshTtlMs()));
  return [
   {
    accessToken: data.access_token as string,
-   refreshToken: data.refresh_token ?? null,
+   refreshToken,
+   refreshExpiresAt,
    expiresAt: new Date(Date.now() + ttlMs - SKEW_MS),
    scope: cleanScope(data.scope),
    subject: claims.subject,
   },
   null,
  ];
-}
-
-export async function getOpenEMRToken(
- userId: string,
- force = false,
-): Promise<Result<string>> {
- try {
-  const [tokens, err] = await getTokens(userId);
-  if (err || !tokens) {
-   return [null, err];
-  }
-
-  if (!force && Date.now() < tokens.expiresAt.getTime())
-   return [tokens.accessToken, null];
-  if (!tokens.refreshToken) {
-   return [
-    null,
-    APIError.unauthorized("OpenEMR session expired. Reconnect your account."),
-   ];
-  }
-  const body = new URLSearchParams({
-   grant_type: "refresh_token",
-   refresh_token: tokens.refreshToken,
-  });
-  const [data, er] = await tokenRequest(body);
-  if (er || !data) {
-   return [null, er];
-  }
-  const [refreshed, error] = toTokenSet(data);
-  if (error || !refreshed) {
-   return [null, error];
-  }
-  const [, ex] = await saveTokens(userId, refreshed);
-  if (ex) return [null, ex];
-  return [refreshed.accessToken, null];
- } catch (e) {
-  return [null, toError(e)];
- }
-}
-
-export async function getTokens(
- userId: string,
-): Promise<Result<OpenEMRTokenSet>> {
- try {
-  const [row] = await defaultDb
-   .select()
-   .from(openemrTokens)
-   .where(eq(openemrTokens.userId, userId))
-   .limit(1);
-  if (!row) {
-   return [
-    null,
-    APIError.unauthorized(
-     "Your OpenEMR account is not connected. Connect it to continue.",
-    ),
-   ];
-  }
-  return [row, null];
- } catch (e) {
-  return [null, toError(e)];
- }
-}
-
-export async function clearTokens(userId: string): Promise<Result<void>> {
- try {
-  await defaultDb.delete(openemrTokens).where(eq(openemrTokens.userId, userId));
-  return [undefined, null];
- } catch (e) {
-  return [null, toError(e)];
- }
 }
 
 export async function clearAccessToken(
@@ -316,20 +245,11 @@ export interface AuthResult {
  refreshToken: string;
 }
 
-export interface RequestActor {
- userId: string;
- role: JwtPayload["role"];
-}
-
 export function requireUserId(req: { user: JwtPayload }): string {
  return req.user.userId;
 }
 
-export function actor(req: { user: JwtPayload }): RequestActor {
- return { userId: req.user.userId, role: req.user.role };
-}
-
-export interface IssuedRefreshToken {
+interface IssuedRefreshToken {
  token: string;
  expiresAt: Date;
 }
@@ -343,7 +263,7 @@ function hashToken(raw: string): string {
 }
 
 export async function issueSession(
- user: User,
+ user: PublicUser | User,
  db: DbClient = defaultDb,
 ): Promise<Result<AuthResult>> {
  const token = await signAppToken({
@@ -354,10 +274,11 @@ export async function issueSession(
  });
  const [issued, err] = await issueRefreshToken(user.id, db);
  if (err || !issued) return [null, err];
- return [{ user: toPublicUser(user), token, refreshToken: issued.token }, null];
+ const { passwordHash: _passwordHash, ...publicUser } = user as User;
+ return [{ user: publicUser, token, refreshToken: issued.token }, null];
 }
 
-export async function issueRefreshToken(
+async function issueRefreshToken(
  userId: string,
  db: DbClient = defaultDb,
 ): Promise<Result<IssuedRefreshToken>> {
@@ -407,18 +328,6 @@ export async function verifyRefreshToken(
 
 export function isIdle(lastActivity: Date): boolean {
  return isBefore(lastActivity, subDays(new Date(), IDLE_WINDOW_DAYS));
-}
-
-export async function revokeRefreshToken(raw: string): Promise<Result<void>> {
- try {
-  await defaultDb
-   .update(refreshTokens)
-   .set({ revoked: true, revokedAt: new Date() })
-   .where(eq(refreshTokens.tokenHash, hashToken(raw)));
-  return [undefined, null];
- } catch (e) {
-  return [null, toError(e)];
- }
 }
 
 export async function revokeUserRefreshTokens(

@@ -1,6 +1,8 @@
+import validate from "@middleware/validation.ts";
 import { authenticate, withOpenEMR } from "@middleware/auth.ts";
 import { requireRole } from "@middleware/role-guard.ts";
 import AdminController from "@module/admin/admin.controller.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class AdminRouter {
@@ -12,7 +14,7 @@ class AdminRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate, withOpenEMR);
+  this.router.use(authenticate, validate(authUserSchema, "user"), withOpenEMR);
 
   this.router.get("/stats", requireRole("admin"), AdminController.stats);
   this.router.get("/users", requireRole("admin"), AdminController.users);

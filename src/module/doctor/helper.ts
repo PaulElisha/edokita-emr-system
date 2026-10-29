@@ -1,17 +1,24 @@
+/** @format */
+
+import { getOpenEMRClient, runWithOpenEMR } from "@openemr/context.ts";
+
 import type { CreateDoctorInput } from "@module/doctor/doctor.service.ts";
-import { openemr } from "@module/openemr/client.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
+import { openemr } from "../../config/openemr-client/client.ts";
 import {
  mapAppointment,
  type MappedPractitioner,
  type MappedQualification,
 } from "@shared/utils/fhir-mapper.ts";
-import { buildHumanName, buildTelecom, IDENTIFIER_SYSTEM } from "@shared/utils/fhir.ts";
+import {
+ buildHumanName,
+ buildTelecom,
+ IDENTIFIER_SYSTEM,
+} from "@shared/utils/fhir.ts";
 import type { Result } from "@shared/types.ts";
 import type { FhirAppointment } from "@shared/types/fhir.ts";
 import { toError } from "@shared/error/error.ts";
 import { findUserPractitionerId } from "@module/user/helper.ts";
-import { listOpenEMRUsers } from "@module/openemr/helpers.ts";
+import { listOpenEMRUsers } from "@module/openemr/helper.ts";
 
 const CONNECTED_PATIENT_APPOINTMENT_FETCH = 500;
 
@@ -19,7 +26,8 @@ export function buildDoctorResource(
  input: CreateDoctorInput,
 ): Record<string, unknown> {
  const identifier: Array<{ system: string; value: string }> = [];
- if (input.npi) identifier.push({ system: IDENTIFIER_SYSTEM.npi, value: input.npi });
+ if (input.npi)
+  identifier.push({ system: IDENTIFIER_SYSTEM.npi, value: input.npi });
  if (input.stateLicenseNumber) {
   identifier.push({
    system: IDENTIFIER_SYSTEM.stateLicense,
@@ -77,10 +85,10 @@ export function buildDoctorResource(
 export async function fetchPractitionerProfiles(): Promise<
  Map<string, MappedQualification>
 > {
-  const profiles = new Map<string, MappedQualification>();
-  try {
-   const users = await listOpenEMRUsers(openemr);
-   for (const user of users) {
+ const profiles = new Map<string, MappedQualification>();
+ try {
+  const users = await runWithOpenEMR(openemr, () => listOpenEMRUsers());
+  for (const user of users) {
    if (!user.uuid) continue;
    const specialty = user.specialty?.trim() || undefined;
    const npi = user.npi?.trim() || undefined;
@@ -113,9 +121,9 @@ export function applyPractitionerProfile(
 }
 
 export async function findConnectedPatientIds(
- client: OpenEMRClient,
  userId: string,
 ): Promise<Result<string[]>> {
+ const client = getOpenEMRClient();
  try {
   const [practitionerId, err] = await findUserPractitionerId(userId);
   if (err || !practitionerId) return [null, err];

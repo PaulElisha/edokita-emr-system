@@ -8,6 +8,7 @@ import {
  refreshTokenSchema,
  resetPasswordSchema,
 } from "@module/auth/auth.service.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class AuthRouter {
@@ -41,10 +42,11 @@ class AuthRouter {
    AuthController.resetPassword,
   );
 
-  this.router.post("/logout", authenticate, AuthController.logout);
+  this.router.post("/logout", authenticate, validate(authUserSchema, "user"), AuthController.logout);
   this.router.post(
    "/change-password",
    authenticate,
+   validate(authUserSchema, "user"),
    validate(changePasswordSchema),
    AuthController.changePassword,
   );

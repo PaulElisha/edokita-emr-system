@@ -3,6 +3,7 @@ import validate from "@middleware/validation.ts";
 import NotificationController from "@module/notification/notification.controller.ts";
 import { notificationQuerySchema } from "@module/notification/notification.service.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class NotificationRouter {
@@ -14,7 +15,7 @@ class NotificationRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate);
+  this.router.use(authenticate, validate(authUserSchema, "user"));
 
   this.router.get(
    "/",

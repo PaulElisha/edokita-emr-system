@@ -1,9 +1,11 @@
+/** @format */
+
 import { OpenEMR } from "@/env.ts";
-import { openemr } from "@module/openemr/client.ts";
+import { openemr } from "../../config/openemr-client/client.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 
-export interface VersionInfo {
+interface VersionInfo {
  engine: string;
  version: string | null;
  details: Record<string, unknown> | null;
@@ -11,7 +13,7 @@ export interface VersionInfo {
  baseUrl: string;
 }
 
-export interface CapabilityStatement {
+interface CapabilityStatement {
  fhirVersion: string;
  resourceTypes: string[];
 }

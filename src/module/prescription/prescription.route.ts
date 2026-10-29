@@ -1,4 +1,5 @@
 import { authenticate, withOpenEMR } from "@middleware/auth.ts";
+import { requirePatientScope } from "@middleware/patient-scope.ts";
 import { requireRole } from "@middleware/role-guard.ts";
 import validate from "@middleware/validation.ts";
 import PrescriptionController from "@module/prescription/prescription.controller.ts";
@@ -8,6 +9,7 @@ import {
 } from "@module/prescription/prescription.service.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
 import { z } from "zod";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 const deleteQuerySchema = z.object({ patientId: z.string().optional() });
@@ -21,12 +23,13 @@ class PrescriptionRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate, withOpenEMR);
+  this.router.use(authenticate, validate(authUserSchema, "user"), withOpenEMR);
 
   this.router.get(
    "/",
    requireRole("admin", "doctor", "patient"),
    validate(prescriptionListQuerySchema, "query"),
+   requirePatientScope("query"),
    PrescriptionController.list,
   );
   this.router.get(

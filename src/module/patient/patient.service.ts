@@ -1,3 +1,7 @@
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import {
  calcAge,
  mapPatient,
@@ -7,8 +11,7 @@ import {
  createdResourceId,
  type OpenEMRCreateResult,
  type QueryValue,
-} from "@module/openemr/client.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
+} from "../../config/openemr-client/client.ts";
 import APIError from "@error/APIError.ts";
 import { buildPatientResource } from "@module/patient/helper.ts";
 import {
@@ -43,9 +46,9 @@ export type PatientListResult = ListResult<MappedPatient>;
 
 class PatientService {
  list = async (
-  client: OpenEMRClient,
   query: PatientListQuery,
  ): Promise<Result<PatientListResult>> => {
+  const client = getOpenEMRClient();
   try {
    const params: Record<string, QueryValue> = {
     _count: query._count,
@@ -68,9 +71,9 @@ class PatientService {
  };
 
  get = async (
-  client: OpenEMRClient,
   id: string,
  ): Promise<Result<MappedPatient>> => {
+  const client = getOpenEMRClient();
   try {
    const patient = await client.fhirRead<FhirPatient>("Patient", id);
    return [mapPatient(patient), null];
@@ -80,9 +83,9 @@ class PatientService {
  };
 
  create = async (
-  client: OpenEMRClient,
   input: CreatePatientInput,
  ): Promise<Result<MappedPatient>> => {
+  const client = getOpenEMRClient();
   try {
    const created = await client.fhirCreate<FhirPatient | OpenEMRCreateResult>(
     "Patient",
@@ -102,10 +105,10 @@ class PatientService {
  };
 
  update = async (
-  client: OpenEMRClient,
   id: string,
   input: CreatePatientInput,
  ): Promise<Result<MappedPatient>> => {
+  const client = getOpenEMRClient();
   try {
    const updated = await client.fhirUpdate<FhirPatient>(
     "Patient",

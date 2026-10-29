@@ -1,9 +1,12 @@
-import OpenEMRClient, { openemr } from "@module/openemr/client.ts";
+/** @format */
+
+import OpenEMRClient, { openemr } from "../../config/openemr-client/client.ts";
 import APIError from "@error/APIError.ts";
 import AppError from "@error/app-error.ts";
 import { verifyAppToken } from "@auth/jwt.ts";
-import { getOpenEMRToken } from "@module/auth/helper.ts";
-import { findUserById } from "@module/user/helper.ts";
+import { runWithOpenEMR } from "@openemr/context.ts";
+import { getOpenEMRToken } from "@openemr/service.config.ts";
+import { findUserById, type AuthUser } from "@module/user/helper.ts";
 import { errors as jwtErrors } from "jose";
 import type { NextFunction, Request, Response } from "express";
 
@@ -29,7 +32,7 @@ export const authenticate = async (
   if ((payload.sessionEpoch ?? 0) !== user.sessionEpoch) {
    return next(APIError.unauthorized("Session no longer valid"));
   }
-  req.user = payload;
+  req.user = { ...payload, ...user } as AuthUser;
   return next();
  } catch (e) {
   if (e instanceof AppError) return next(e);
@@ -50,7 +53,7 @@ export const withOpenEMR = async (
  }
  if (req.user.role === "patient") {
   req.openemr = openemr;
-  return next();
+  return runWithOpenEMR(openemr, next);
  }
  const userId = req.user.userId;
  req.openemr = new OpenEMRClient(async (force?: boolean) => {
@@ -58,5 +61,5 @@ export const withOpenEMR = async (
   if (err || !token) throw err;
   return token;
  });
- next();
+ return runWithOpenEMR(req.openemr, next);
 };

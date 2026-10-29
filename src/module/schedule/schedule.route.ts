@@ -6,6 +6,7 @@ import {
  practitionerParamSchema,
  scheduleBodySchema,
 } from "@module/schedule/schedule.service.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class ScheduleRouter {
@@ -17,7 +18,7 @@ class ScheduleRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate);
+  this.router.use(authenticate, validate(authUserSchema, "user"));
 
   this.router.get(
    "/:practitionerId",

@@ -1,17 +1,18 @@
+/** @format */
+
 import { z } from "zod";
 import { db } from "@db/db.ts";
-import { withTransaction } from "@db/transaction.ts";
+import { Transactional } from "@db/transaction.ts";
 import {
  conversationMessages,
  conversationThreads,
  threadReads,
 } from "@db/schema/messaging.ts";
-import { roleSchema } from "@db/schema/role.ts";
 import {
- findUserById,
  findUserByPatientId,
  findUserByPractitionerId,
 } from "@module/user/helper.ts";
+import type { PublicUser } from "@module/user/helper.ts";
 import { notifyMany } from "@module/notification/notification.service.ts";
 import APIError from "@error/APIError.ts";
 import { countParam } from "@shared/schemas/common.ts";
@@ -19,11 +20,6 @@ import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { unique } from "@shared/utils/array.ts";
 import { asc, desc, eq, or } from "drizzle-orm";
-
-export interface MessageActor {
- userId: string;
- role: z.infer<typeof roleSchema>;
-}
 
 export const threadBodySchema = z.object({
  patientId: z.string().optional(),
@@ -37,38 +33,23 @@ export const messageBodySchema = z.object({
 });
 export type SendMessageInput = z.infer<typeof messageBodySchema>;
 
-export const threadListQuerySchema = z.object({ _count: countParam.default(100) });
+export const threadListQuerySchema = z.object({
+ _count: countParam.default(100),
+});
 export type ThreadListQuery = z.infer<typeof threadListQuerySchema>;
 
-export type ThreadRow = typeof conversationThreads.$inferSelect;
-export type MessageRow = typeof conversationMessages.$inferSelect;
+type ThreadRow = typeof conversationThreads.$inferSelect;
+type MessageRow = typeof conversationMessages.$inferSelect;
 
-interface ActorLinks {
- userId: string;
- role: MessageActor["role"];
- patientId?: string;
- practitionerId?: string;
-}
-
-async function resolveActor(userId: string): Promise<Result<ActorLinks>> {
- const [user, err] = await findUserById(userId);
- if (err || !user) return [null, err];
- return [
-  {
-   userId: user.id,
-   role: user.role,
-   patientId: user.openemr.patientId,
-   practitionerId: user.openemr.practitionerId,
-  },
-  null,
- ];
-}
-
-function canAccess(thread: ThreadRow, actor: ActorLinks): boolean {
- if (actor.role === "admin") return true;
- if (thread.createdBy === actor.userId) return true;
- if (actor.patientId && thread.patientId === actor.patientId) return true;
- if (actor.practitionerId && thread.practitionerId === actor.practitionerId)
+function canAccess(thread: ThreadRow, user: PublicUser): boolean {
+ if (user.role === "admin") return true;
+ if (thread.createdBy === user.id) return true;
+ if (user.openemr.patientId && thread.patientId === user.openemr.patientId)
+  return true;
+ if (
+  user.openemr.practitionerId &&
+  thread.practitionerId === user.openemr.practitionerId
+ )
   return true;
  return false;
 }
@@ -76,13 +57,10 @@ function canAccess(thread: ThreadRow, actor: ActorLinks): boolean {
 class MessagingService {
  listThreads = async (
   query: ThreadListQuery,
-  userId: string,
+  user: PublicUser,
  ): Promise<Result<ListResult<ThreadRow>>> => {
   try {
-   const [actor, aerr] = await resolveActor(userId);
-   if (aerr || !actor) return [null, aerr];
-
-   if (actor.role === "admin") {
+   if (user.role === "admin") {
     const rows = await db
      .select()
      .from(conversationThreads)
@@ -92,18 +70,21 @@ class MessagingService {
    }
 
    const filters = [];
-   if (actor.patientId) filters.push(eq(conversationThreads.patientId, actor.patientId));
-   if (actor.practitionerId)
-    filters.push(eq(conversationThreads.practitionerId, actor.practitionerId));
-   filters.push(eq(conversationThreads.createdBy, actor.userId));
+   if (user.openemr.patientId)
+    filters.push(eq(conversationThreads.patientId, user.openemr.patientId));
+   if (user.openemr.practitionerId)
+    filters.push(
+     eq(conversationThreads.practitionerId, user.openemr.practitionerId),
+    );
+   filters.push(eq(conversationThreads.createdBy, user.id));
 
    const rows = await db
     .select()
     .from(conversationThreads)
     .where(or(...filters))
-     .orderBy(desc(conversationThreads.lastMessageAt))
-     .limit(query._count);
-    return [{ total: rows.length, items: rows }, null];
+    .orderBy(desc(conversationThreads.lastMessageAt))
+    .limit(query._count);
+   return [{ total: rows.length, items: rows }, null];
   } catch (e) {
    return [null, toError(e)];
   }
@@ -111,16 +92,11 @@ class MessagingService {
 
  createThread = async (
   input: CreateThreadInput,
-  userId: string,
+  user: PublicUser,
  ): Promise<Result<ThreadRow>> => {
   try {
-   const [actor, aerr] = await resolveActor(userId);
-   if (aerr || !actor) return [null, aerr];
-
-   const patientId =
-    actor.role === "patient" ? actor.patientId : input.patientId;
-   const practitionerId =
-    actor.role === "doctor" ? actor.practitionerId : input.practitionerId;
+   const patientId = user.openemr.patientId ?? input.patientId;
+   const practitionerId = user.openemr.practitionerId ?? input.practitionerId;
    if (!patientId && !practitionerId) {
     return [
      null,
@@ -134,7 +110,7 @@ class MessagingService {
      subject: input.subject,
      patientId,
      practitionerId,
-     createdBy: userId,
+     createdBy: user.id,
      lastMessageAt: new Date(),
     })
     .returning();
@@ -147,17 +123,17 @@ class MessagingService {
 
  listMessages = async (
   threadId: string,
-  userId: string,
+  user: PublicUser,
   _query: ThreadListQuery,
  ): Promise<Result<ListResult<MessageRow>>> => {
   try {
-   const [loaded, terr] = await this.loadThread(threadId, userId);
-   if (terr || !loaded) return [null, terr];
+   const [thread, terr] = await this.loadThread(threadId, user);
+   if (terr || !thread) return [null, terr];
 
    const rows = await db
     .select()
     .from(conversationMessages)
-    .where(eq(conversationMessages.threadId, loaded.thread.id))
+    .where(eq(conversationMessages.threadId, thread.id))
     .orderBy(asc(conversationMessages.createdAt));
    return [{ total: rows.length, items: rows }, null];
   } catch (e) {
@@ -168,45 +144,52 @@ class MessagingService {
  send = async (
   threadId: string,
   input: SendMessageInput,
-  userId: string,
+  user: PublicUser,
  ): Promise<Result<MessageRow>> => {
   try {
-   const [loaded, terr] = await this.loadThread(threadId, userId);
-   if (terr || !loaded) return [null, terr];
-   const { thread, actor } = loaded;
+   const [thread, terr] = await this.loadThread(threadId, user);
+   if (terr || !thread) return [null, terr];
 
-   let row: MessageRow | undefined;
-   await withTransaction(async (tx) => {
-    const [created] = await tx
-     .insert(conversationMessages)
-     .values({ threadId: thread.id, senderId: userId, body: input.body })
-     .returning();
-    if (!created) throw toError("Failed to send message");
-    await tx
-     .update(conversationThreads)
-     .set({ lastMessageAt: new Date() })
-     .where(eq(conversationThreads.id, thread.id));
-    row = created;
-   });
-   if (!row) return [null, toError("Failed to send message")];
-
-   await this.notifyRecipients(thread, actor);
+   const row = await this.persistMessage(thread.id, user.id, input.body);
+   await this.notifyRecipients(thread, user);
    return [row, null];
   } catch (e) {
    return [null, toError(e)];
   }
  };
 
+ @Transactional()
+ private async persistMessage(
+  threadId: string,
+  senderId: string,
+  body: string,
+ ): Promise<MessageRow> {
+  const [created] = await db
+   .insert(conversationMessages)
+   .values({ threadId, senderId, body })
+   .returning();
+  if (!created) throw toError("Failed to send message");
+  await db
+   .update(conversationThreads)
+   .set({ lastMessageAt: new Date() })
+   .where(eq(conversationThreads.id, threadId));
+  return created;
+ }
+
  markRead = async (
   threadId: string,
-  userId: string,
+  user: PublicUser,
  ): Promise<Result<{ success: true }>> => {
   try {
-   const [loaded, terr] = await this.loadThread(threadId, userId);
-   if (terr || !loaded) return [null, terr];
+   const [thread, terr] = await this.loadThread(threadId, user);
+   if (terr || !thread) return [null, terr];
    await db
     .insert(threadReads)
-    .values({ threadId: loaded.thread.id, userId, lastReadAt: new Date() })
+    .values({
+     threadId: thread.id,
+     userId: user.id,
+     lastReadAt: new Date(),
+    })
     .onConflictDoUpdate({
      target: [threadReads.threadId, threadReads.userId],
      set: { lastReadAt: new Date() },
@@ -219,27 +202,23 @@ class MessagingService {
 
  private loadThread = async (
   threadId: string,
-  userId: string,
- ): Promise<Result<{ thread: ThreadRow; actor: ActorLinks }>> => {
-  const [[thread], [actor, err]] = await Promise.all([
-   db
-    .select()
-    .from(conversationThreads)
-    .where(eq(conversationThreads.id, threadId))
-    .limit(1),
-   resolveActor(userId),
-  ]);
+  user: PublicUser,
+ ): Promise<Result<ThreadRow>> => {
+  const [thread] = await db
+   .select()
+   .from(conversationThreads)
+   .where(eq(conversationThreads.id, threadId))
+   .limit(1);
   if (!thread) return [null, APIError.notFound("Conversation not found")];
-  if (err || !actor) return [null, err];
-  if (!canAccess(thread, actor)) {
+  if (!canAccess(thread, user)) {
    return [null, APIError.notFound("Conversation not found")];
   }
-  return [{ thread, actor }, null];
+  return [thread, null];
  };
 
  private notifyRecipients = async (
   thread: ThreadRow,
-  actor: ActorLinks,
+  user: PublicUser,
  ): Promise<void> => {
   const [patient, practitioner] = await Promise.all([
    thread.patientId ? findUserByPatientId(thread.patientId) : null,
@@ -251,7 +230,7 @@ class MessagingService {
    thread.createdBy,
    patient?.[0]?.id,
    practitioner?.[0]?.id,
-  ]).filter((id) => id !== actor.userId);
+  ]).filter((id) => id !== user.id);
   await notifyMany(recipients, {
    type: "message",
    title: "New message",

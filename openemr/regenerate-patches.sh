@@ -7,8 +7,8 @@ dockerfile="$repo_root/Dockerfile"
 work="$overlay/.work"
 
 patch_targets=(
-  "0001-add-lab-standard-routes.patch:apis/routes/_rest_routes_standard.inc.php"
-  "0002-register-lab-scopes.patch:src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php"
+  "0001-add-standard-api-routes.patch:apis/routes/_rest_routes_standard.inc.php"
+  "0002-register-api-scopes.patch:src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php"
 )
 
 regen_only="false"

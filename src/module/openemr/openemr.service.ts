@@ -1,3 +1,5 @@
+/** @format */
+
 import { OpenEMR } from "@/env.ts";
 import {
  codeChallenge,
@@ -7,40 +9,49 @@ import {
 } from "@auth/pkce.ts";
 import {
  decodeIdTokenClaims,
- getOpenEMRToken,
- getTokens,
  savePending,
- saveTokens,
  takePending,
  toTokenSet,
  tokenRequest,
  type TokenResponse,
 } from "@module/auth/helper.ts";
+import { getOpenEMRToken } from "@openemr/service.config.ts";
+
+import { getTokens, saveTokens } from "@openemr/utils.ts";
 import {
  findUserById,
  linkOpenEMR,
- toPublicUser,
  type OpenEMRLinkUpdate,
  type OpenEMRCredentials,
  type PublicUser,
 } from "@module/user/helper.ts";
 import { toError } from "@shared/error/error.ts";
 import type { Result } from "@shared/types.ts";
-import { withTransaction } from "@db/transaction.ts";
+import { Transactional } from "@db/transaction.ts";
 import { z } from "zod";
+import { RegisterInput } from "@module/auth/auth.service.ts";
+import {
+ generateOpenEMRPassword,
+ OpenEMRProvisionResult,
+ resolveAccountByEmail,
+} from "./helper.ts";
+import { createOpenEMRLogin } from "./admin-ui.ts";
+import { openemr } from "@openemr/client.ts";
+import { runWithOpenEMR } from "@openemr/context.ts";
+
+import PatientService from "@module/patient/patient.service.ts";
 
 export const ROLE_SCOPES: Record<string, string> = {
  patient:
-  "openid offline_access api:fhir api:oemr patient/Patient.read patient/Observation.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Immunization.read patient/Procedure.read patient/Encounter.read patient/Appointment.read",
+  "openid offline_access api:fhir api:oemr patient/Patient.read patient/Observation.read patient/Condition.read patient/MedicationRequest.read patient/AllergyIntolerance.read patient/Immunization.read patient/Procedure.read patient/Encounter.read patient/Appointment.read patient/observation.rs",
  doctor:
-  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Appointment.read user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus",
+  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Practitioner.read user/Appointment.read user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus user/observation.cruds",
  admin:
-  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Practitioner.read user/Practitioner.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Appointment.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus",
- lab:
-  "openid offline_access api:fhir api:oemr user/Patient.read user/Observation.read user/Procedure.read user/lab_order.crus user/lab_result.crus",
+  "openid offline_access api:fhir api:oemr user/Patient.read user/Patient.write user/Practitioner.read user/Practitioner.write user/Observation.read user/Condition.read user/MedicationRequest.read user/AllergyIntolerance.read user/Immunization.read user/Procedure.read user/Encounter.read user/Appointment.read user/user.rs user/facility.crus user/appointment.cruds user/encounter.crus user/vital.crus user/list.r user/medical_problem.cruds user/allergy.cruds user/medication.cruds user/prescription.crds user/soap_note.crus user/lab_order.crus user/lab_result.crus user/observation.cruds",
+ lab: "openid offline_access api:fhir api:oemr user/Patient.read user/Observation.read user/Procedure.read user/lab_order.crus user/lab_result.crus user/observation.rs",
 };
 
-export const callbackQuerySchema = z.object({
+const callbackQuerySchema = z.object({
  code: z.string().optional(),
  state: z.string().optional(),
  error: z.string().optional(),
@@ -48,17 +59,90 @@ export const callbackQuerySchema = z.object({
 });
 export type CallbackQuery = z.infer<typeof callbackQuerySchema>;
 
-export interface RefreshResult {
+interface RefreshResult {
  accessToken: string;
  expiresAt: Date | null;
  scope: string | null;
 }
 
-export interface AuthorizeResult {
+interface AuthorizeResult {
  url: string;
 }
 
 class OpenEMRService {
+ provisionOpenEMR = async (
+  input: RegisterInput,
+ ): Promise<Result<OpenEMRProvisionResult>> => {
+  try {
+   if (input.role === "doctor" || input.role === "lab") {
+    const password = generateOpenEMRPassword();
+    const [, createErr] = await createOpenEMRLogin({
+     username: input.email,
+     password,
+     firstName: input.firstName,
+     lastName: input.lastName,
+     email: input.email,
+     npi: input.npi,
+     group: input.role === "doctor" ? "Physicians" : "Clinicians",
+    });
+    if (createErr) return [null, createErr];
+
+    const [account, aErr] = await runWithOpenEMR(openemr, () =>
+     resolveAccountByEmail(input.email),
+    );
+    if (aErr || !account) return [null, aErr];
+    return [
+     {
+      link: { practitionerId: account.uuid },
+      credentials: { username: input.email, password },
+     },
+     null,
+    ];
+   }
+
+   if (input.role === "patient") {
+    const [created, err] = await runWithOpenEMR(openemr, () =>
+     PatientService.create({
+      fname: input.firstName,
+      lname: input.lastName,
+      birthDate: input.birthDate,
+      gender: input.gender,
+      email: input.email,
+      phone: input.phone,
+     }),
+    );
+    if (err || !created) return [null, err];
+    return [
+     {
+      link: {
+       patientId: created.id ? String(created.id) : undefined,
+       patientPid: created.pid,
+      },
+     },
+     null,
+    ];
+   }
+
+   if (input.role === "admin") {
+    try {
+     await createOpenEMRLogin({
+      username: input.email,
+      password: input.password,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      email: input.email,
+      group: "Administrators",
+     });
+    } catch {
+     // Admins can log into OpenEMR later; never block registration on this.
+    }
+   }
+   return [{ link: {} }, null];
+  } catch (e) {
+   return [null, toError(e, "provisionOpenEMR")];
+  }
+ };
+
  refresh = async (userId: string): Promise<Result<RefreshResult>> => {
   const [accessToken, err] = await getOpenEMRToken(userId, true);
   if (err || !accessToken) return [null, err];
@@ -128,7 +212,7 @@ class OpenEMRService {
    }
 
    await this.persistConnection(user, data);
-   return [toPublicUser(user), null];
+   return [user, null];
   } catch (e) {
    return [null, toError(e)];
   }
@@ -157,6 +241,7 @@ class OpenEMRService {
   }
  };
 
+ @Transactional()
  private async persistConnection(
   user: PublicUser,
   data: TokenResponse,
@@ -173,15 +258,13 @@ class OpenEMRService {
   if (claims.subject) link.subject = claims.subject;
   if (claims.fhirUser) link.fhirUser = claims.fhirUser;
 
-  await withTransaction(async (tx) => {
-   const [, saveErr] = await saveTokens(user.id, tokens, tx);
-   if (saveErr) throw saveErr;
+  const [, saveErr] = await saveTokens(user.id, tokens);
+  if (saveErr) throw saveErr;
 
-   if (Object.keys(link).length === 0) return;
+  if (Object.keys(link).length === 0) return;
 
-   const [, linkErr] = await linkOpenEMR(user.id, link, tx);
-   if (linkErr) throw linkErr;
-  });
+  const [, linkErr] = await linkOpenEMR(user.id, link);
+  if (linkErr) throw linkErr;
  }
 }
 

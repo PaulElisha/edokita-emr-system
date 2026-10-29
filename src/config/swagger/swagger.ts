@@ -34,6 +34,8 @@ import {
  emrVitalItemParamSchema,
  encounterBodySchema,
  medicationBodySchema,
+ observationBodySchema,
+ observationUpdateSchema,
  soapNoteBodySchema,
  vitalsBodySchema,
 } from "@module/emr/emr.service.ts";
@@ -768,20 +770,40 @@ const spec = {
     responses: { "200": { description: "OK" } },
    },
   },
-  "/api/emr/{patientId}/labs": {
+  "/api/emr/{patientId}/observations": {
    get: {
     tags: ["EMR"],
-    summary: "Laboratory observations",
+    summary: "List clinical observations for a patient",
     parameters: paramsFrom(emrPatientParamSchema, "path", true),
     responses: { "200": { description: "OK" } },
    },
+   post: {
+    tags: ["EMR"],
+    summary: "Record a clinical observation on an encounter (doctor or admin)",
+    parameters: paramsFrom(emrPatientParamSchema, "path", true),
+    requestBody: requestBody(observationBodySchema),
+    responses: { "201": { description: "Created" } },
+   },
   },
-  "/api/emr/{patientId}/labs/{observationId}": {
+  "/api/emr/{patientId}/observations/{observationId}": {
    get: {
     tags: ["EMR"],
-    summary: "Get a single laboratory observation for a patient",
+    summary: "Get a single clinical observation for a patient",
     parameters: paramsFrom(emrObservationParamSchema, "path", true),
     responses: { "200": jsonResponse("OK", "Observation") },
+   },
+   put: {
+    tags: ["EMR"],
+    summary: "Update a recorded clinical observation (doctor or admin)",
+    parameters: paramsFrom(emrObservationParamSchema, "path", true),
+    requestBody: requestBody(observationUpdateSchema),
+    responses: { "200": { description: "OK" } },
+   },
+   delete: {
+    tags: ["EMR"],
+    summary: "Delete a recorded clinical observation (doctor or admin)",
+    parameters: paramsFrom(emrObservationParamSchema, "path", true),
+    responses: { "200": { description: "OK" } },
    },
   },
   "/api/emr/{patientId}/encounters": {

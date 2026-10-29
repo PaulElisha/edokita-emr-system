@@ -6,9 +6,7 @@ export type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type DbClient = typeof db | Transaction;
 
-function withTransaction<T>(
- fn: (tx: Transaction) => Promise<T>,
-): Promise<T> {
+function withTransaction<T>(fn: (tx: Transaction) => Promise<T>): Promise<T> {
  const current = transactionStorage.getStore();
  if (current) return fn(current);
  return db.transaction((tx) => transactionStorage.run(tx, () => fn(tx)));

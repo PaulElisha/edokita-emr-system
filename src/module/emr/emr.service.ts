@@ -1,31 +1,35 @@
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import { z } from "zod";
 import {
  type MappedClinical,
  type MappedEncounter,
  type MappedProvider,
 } from "@shared/utils/fhir-mapper.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
 import {
  buildAllergyPayload,
  buildConditionPayload,
  buildEncounterPayload,
  buildMedicationPayload,
+ buildObservationPayload,
  buildVitalsPayload,
  findEmrAuthorsByPatient,
- getObservation,
+ getObservationResource,
+ listObservations,
  searchClinical,
  searchObservations,
 } from "@module/emr/helper.ts";
 import type { FhirEncounter } from "@shared/types/fhir.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import APIError from "@error/APIError.ts";
+import AppError from "@error/app-error.ts";
+import HttpStatus from "@enum/http.ts";
 import { toError } from "@shared/error/error.ts";
-import {
- resolveEncounterEid,
- resolvePatientPid,
-} from "@module/patient/helper.ts";
+import { resolveEncounterEid } from "@module/patient/helper.ts";
 
-export const clinicalKindSchema = z.enum([
+const clinicalKindSchema = z.enum([
  "conditions",
  "allergies",
  "medications",
@@ -95,10 +99,9 @@ export const vitalsBodySchema = z
   headCircumference: z.coerce.number().positive().optional(),
   note: z.string().optional(),
  })
- .refine(
-  (v) => vitalMeasurementKeys.some((key) => v[key] !== undefined),
-  { message: "At least one vital measurement is required" },
- );
+ .refine((v) => vitalMeasurementKeys.some((key) => v[key] !== undefined), {
+  message: "At least one vital measurement is required",
+ });
 export type RecordVitalsInput = z.infer<typeof vitalsBodySchema>;
 
 const diagnosisSchema = z
@@ -137,6 +140,24 @@ export const soapNoteBodySchema = z.object({
 });
 export type SoapNoteInput = z.infer<typeof soapNoteBodySchema>;
 
+export const observationBodySchema = z.object({
+ encounterId: z.string().min(1),
+ category: z.string().optional(),
+ code: z.string().min(1),
+ codeType: z.string().optional(),
+ description: z.string().min(1),
+ value: z.string().optional(),
+ unit: z.string().optional(),
+ status: z.string().optional(),
+ type: z.string().optional(),
+ date: z.string().optional(),
+ endDate: z.string().optional(),
+ note: z.string().optional(),
+});
+export type ObservationInput = z.infer<typeof observationBodySchema>;
+
+export const observationUpdateSchema = observationBodySchema.partial();
+
 export const emrClinicalItemParamSchema = emrPatientParamSchema.extend({
  itemId: z.string().min(1),
 });
@@ -159,7 +180,7 @@ export type EmrObservationParam = z.infer<typeof emrObservationParamSchema>;
 
 export type StandardResource = Record<string, unknown>;
 
-export type SoapNote = StandardResource & {
+type SoapNote = StandardResource & {
  provider?: MappedProvider;
  authoredAt?: string;
 };
@@ -175,7 +196,7 @@ export interface ObservationValue {
  unit?: string;
 }
 
-export interface ObservationReferenceRange {
+interface ObservationReferenceRange {
  low?: number;
  high?: number;
  unit?: string;
@@ -197,14 +218,35 @@ export interface ObservationItem {
 
 export type ObservationResult = ListResult<ObservationItem>;
 
-export interface LastAttended {
+export interface EmrObservation {
+ id?: string;
+ patientId?: string;
+ encounterId?: string;
+ category?: string;
+ code?: string;
+ codeType?: string;
+ description?: string;
+ value?: string;
+ unit?: string;
+ status?: string;
+ type?: string;
+ date?: string;
+ endDate?: string;
+ note?: string;
+ provider?: MappedProvider;
+ authoredAt?: string;
+}
+
+export type EmrObservationList = ListResult<EmrObservation>;
+
+interface LastAttended {
  encounterId?: string;
  date?: string;
  provider?: MappedProvider;
  authoredAt?: string;
 }
 
-export interface ClinicalSummary {
+interface ClinicalSummary {
  patientId: string;
  conditions: ClinicalSearchResult;
  allergies: ClinicalSearchResult;
@@ -235,9 +277,17 @@ function latestEncounter(items: ClinicalItem[]): MappedEncounter | undefined {
  return latest;
 }
 
+const EMR_UUID_RE =
+ /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function patientRef(patientId: string): Record<string, string> {
+ return EMR_UUID_RE.test(patientId)
+  ? { patient_uuid: patientId }
+  : { patient_id: patientId };
+}
+
 class EmrService {
  summary = async (
-  client: OpenEMRClient,
   patientId: string,
  ): Promise<Result<ClinicalSummary>> => {
   const authors = await findEmrAuthorsByPatient(patientId);
@@ -251,14 +301,14 @@ class EmrService {
    vitals,
    labs,
   ] = await Promise.all([
-   searchClinical(client, "conditions", patientId, authors),
-   searchClinical(client, "allergies", patientId, authors),
-   searchClinical(client, "medications", patientId, authors),
-   searchClinical(client, "immunizations", patientId, authors),
-   searchClinical(client, "procedures", patientId, authors),
-   searchClinical(client, "encounters", patientId, authors),
-   searchObservations(client, patientId, "vital-signs", authors),
-   searchObservations(client, patientId, "laboratory", authors),
+   searchClinical( "conditions", patientId, authors),
+   searchClinical( "allergies", patientId, authors),
+   searchClinical( "medications", patientId, authors),
+   searchClinical( "immunizations", patientId, authors),
+   searchClinical( "procedures", patientId, authors),
+   searchClinical( "encounters", patientId, authors),
+   searchObservations( patientId, "vital-signs", authors),
+   searchObservations( patientId, "laboratory", authors),
   ]);
 
   const err =
@@ -299,31 +349,89 @@ class EmrService {
  };
 
  clinical = (
-  client: OpenEMRClient,
   patientId: string,
   kind: ClinicalKind,
  ): Promise<Result<ClinicalSearchResult>> =>
-  searchClinical(client, kind, patientId);
+  {
+  return searchClinical( kind, patientId);
+ };
 
  observations = (
-  client: OpenEMRClient,
   patientId: string,
-  category: "vital-signs" | "laboratory",
- ): Promise<Result<ObservationResult>> =>
-  searchObservations(client, patientId, category);
+  category?: string,
+ ): Promise<Result<EmrObservationList>> =>
+  {
+  return listObservations( patientId, category);
+ };
 
  observation = (
-  client: OpenEMRClient,
   patientId: string,
   observationId: string,
- ): Promise<Result<ObservationItem>> =>
-  getObservation(client, patientId, observationId);
+ ): Promise<Result<EmrObservation>> =>
+  {
+  return getObservationResource( patientId, observationId);
+ };
+
+ vitalObservations = (
+  patientId: string,
+ ): Promise<Result<ObservationResult>> =>
+  {
+  return searchObservations( patientId, "vital-signs");
+ };
+
+ createObservation = async (
+  patientId: string,
+  input: ObservationInput,
+ ): Promise<Result<StandardResource>> => {
+  const client = getOpenEMRClient();
+  try {
+   const created = await client.standardPost<StandardResource>(
+    "/api/observation",
+    { ...buildObservationPayload(input), ...patientRef(patientId) },
+   );
+   return [created[0] ?? {}, null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ updateObservation = async (
+  observationId: string,
+  input: Partial<ObservationInput>,
+ ): Promise<Result<StandardResource>> => {
+  const client = getOpenEMRClient();
+  try {
+   const updated = await client.standardPut<StandardResource>(
+    `/api/observation/${observationId}`,
+    buildObservationPayload(input),
+   );
+   return [updated[0] ?? {}, null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ deleteObservation = async (
+  patientId: string,
+  observationId: string,
+ ): Promise<Result<StandardResource>> => {
+  const client = getOpenEMRClient();
+  try {
+   const deleted = await client.standardDelete<StandardResource>(
+    `/api/observation/${observationId}`,
+    { ...patientRef(patientId) },
+   );
+   return [deleted[0] ?? {}, null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
 
  encounter = async (
-  client: OpenEMRClient,
   patientId: string,
   encounterId: string,
  ): Promise<Result<FhirEncounter>> => {
+  const client = getOpenEMRClient();
   try {
    const bundle = await client.fhirSearch("Encounter", {
     patient: patientId,
@@ -340,10 +448,10 @@ class EmrService {
  };
 
  createEncounter = async (
-  client: OpenEMRClient,
   patientId: string,
   input: CreateEncounterInput,
  ): Promise<Result<StandardResource>> => {
+  const client = getOpenEMRClient();
   try {
    const created = await client.standardPost<StandardResource>(
     `/api/patient/${patientId}/encounter`,
@@ -356,22 +464,19 @@ class EmrService {
  };
 
  recordVitals = async (
-  client: OpenEMRClient,
   patientId: string,
   encounterId: string,
   input: RecordVitalsInput,
  ): Promise<Result<StandardResource>> => {
+  const client = getOpenEMRClient();
   try {
-   const [[pid, pe], [eid, ee]] = await Promise.all([
-    resolvePatientPid(client, patientId),
-    resolveEncounterEid(client, patientId, encounterId),
-   ]);
-   if (pe || !pid) {
-    return [null, pe];
-   }
+   const [eid, ee] = await resolveEncounterEid(
+    patientId,
+    encounterId,
+   );
    if (ee || !eid) return [null, ee];
    const created = await client.standardPost<StandardResource>(
-    `/api/patient/${pid}/encounter/${eid}/vital`,
+    `/api/patient/${patientId}/encounter/${eid}/vital`,
     buildVitalsPayload(input),
    );
    return [created[0] ?? {}, null];
@@ -381,23 +486,20 @@ class EmrService {
  };
 
  updateVitals = async (
-  client: OpenEMRClient,
   patientId: string,
   encounterId: string,
   vitalId: string,
   input: RecordVitalsInput,
  ): Promise<Result<StandardResource>> => {
+  const client = getOpenEMRClient();
   try {
-   const [[pid, pe], [eid, ee]] = await Promise.all([
-    resolvePatientPid(client, patientId),
-    resolveEncounterEid(client, patientId, encounterId),
-   ]);
-   if (pe || !pid) {
-    return [null, pe];
-   }
+   const [eid, ee] = await resolveEncounterEid(
+    patientId,
+    encounterId,
+   );
    if (ee || !eid) return [null, ee];
    const updated = await client.standardPut<StandardResource>(
-    `/api/patient/${pid}/encounter/${eid}/vital/${vitalId}`,
+    `/api/patient/${patientId}/encounter/${eid}/vital/${vitalId}`,
     buildVitalsPayload(input),
    );
    return [updated[0] ?? {}, null];
@@ -407,86 +509,83 @@ class EmrService {
  };
 
  createCondition = (
-  client: OpenEMRClient,
   patientId: string,
   input: ConditionInput,
  ): Promise<Result<StandardResource>> =>
-  this.writeStandard(
-   client,
+  {
+  return this.writeStandard(
    "POST",
    `/api/patient/${patientId}/medical_problem`,
    buildConditionPayload(input),
   );
+ };
 
  updateCondition = (
-  client: OpenEMRClient,
   patientId: string,
   itemId: string,
   input: ConditionInput,
  ): Promise<Result<StandardResource>> =>
-  this.writeStandard(
-   client,
+  {
+  return this.writeStandard(
    "PUT",
    `/api/patient/${patientId}/medical_problem/${itemId}`,
    buildConditionPayload(input),
   );
+ };
 
  deleteCondition = (
-  client: OpenEMRClient,
   patientId: string,
   itemId: string,
  ): Promise<Result<StandardResource>> =>
-  this.writeStandard(
-   client,
+  {
+  return this.writeStandard(
    "DELETE",
    `/api/patient/${patientId}/medical_problem/${itemId}`,
   );
+ };
 
  createAllergy = (
-  client: OpenEMRClient,
   patientId: string,
   input: AllergyInput,
  ): Promise<Result<StandardResource>> =>
-  this.writeStandard(
-   client,
+  {
+  return this.writeStandard(
    "POST",
    `/api/patient/${patientId}/allergy`,
    buildAllergyPayload(input),
   );
+ };
 
  updateAllergy = (
-  client: OpenEMRClient,
   patientId: string,
   itemId: string,
   input: AllergyInput,
  ): Promise<Result<StandardResource>> =>
-  this.writeStandard(
-   client,
+  {
+  return this.writeStandard(
    "PUT",
    `/api/patient/${patientId}/allergy/${itemId}`,
    buildAllergyPayload(input),
   );
+ };
 
  deleteAllergy = (
-  client: OpenEMRClient,
   patientId: string,
   itemId: string,
  ): Promise<Result<StandardResource>> =>
-  this.writeStandard(
-   client,
+  {
+  return this.writeStandard(
    "DELETE",
    `/api/patient/${patientId}/allergy/${itemId}`,
   );
+ };
 
  createMedication = async (
-  client: OpenEMRClient,
   patientId: string,
   input: MedicationInput,
  ): Promise<Result<StandardResource>> => {
-  const [pid, pe] = await resolvePatientPid(client, patientId);
-  if (pe || !pid) return [null, pe];
+  const pid = patientId;
   const [created, err] = await this.writeStandard(
-   client,
    "POST",
    `/api/patient/${pid}/medication`,
    buildMedicationPayload(input),
@@ -494,22 +593,19 @@ class EmrService {
   if (err) return [null, err];
   const record = created ?? {};
   if (record.id !== undefined) {
-   const uuid = await this.findMedicationUuid(client, pid, record.id);
+   const uuid = await this.findMedicationUuid( pid, record.id);
    if (uuid) return [{ ...record, uuid }, null];
   }
   return [record, null];
  };
 
  updateMedication = async (
-  client: OpenEMRClient,
   patientId: string,
   itemId: string,
   input: MedicationInput,
  ): Promise<Result<StandardResource>> => {
-  const [pid, pe] = await resolvePatientPid(client, patientId);
-  if (pe || !pid) return [null, pe];
+  const pid = patientId;
   return this.writeStandard(
-   client,
    "PUT",
    `/api/patient/${pid}/medication/${itemId}`,
    buildMedicationPayload(input),
@@ -517,62 +613,63 @@ class EmrService {
  };
 
  deleteMedication = async (
-  client: OpenEMRClient,
   patientId: string,
   itemId: string,
  ): Promise<Result<StandardResource>> => {
-  const [pid, pe] = await resolvePatientPid(client, patientId);
-  if (pe || !pid) return [null, pe];
+  const pid = patientId;
   return this.writeStandard(
-   client,
    "DELETE",
    `/api/patient/${pid}/medication/${itemId}`,
   );
  };
 
  createSoapNote = async (
-  client: OpenEMRClient,
   patientId: string,
   encounterId: string,
   input: SoapNoteInput,
  ): Promise<Result<StandardResource>> => {
-  const [pid, pe] = await resolvePatientPid(client, patientId);
-  if (pe || !pid) return [null, pe];
+  const [eid, ee] = await resolveEncounterEid(
+   patientId,
+   encounterId,
+  );
+  if (ee || !eid) return [null, ee];
   return this.writeStandard(
-   client,
    "POST",
-   `/api/patient/${pid}/encounter/${encounterId}/soap_note`,
+   `/api/patient/${patientId}/encounter/${eid}/soap_note`,
    input,
   );
  };
 
  updateSoapNote = async (
-  client: OpenEMRClient,
   patientId: string,
   encounterId: string,
   noteId: string,
   input: SoapNoteInput,
  ): Promise<Result<StandardResource>> => {
-  const [pid, pe] = await resolvePatientPid(client, patientId);
-  if (pe || !pid) return [null, pe];
+  const [eid, ee] = await resolveEncounterEid(
+   patientId,
+   encounterId,
+  );
+  if (ee || !eid) return [null, ee];
   return this.writeStandard(
-   client,
    "PUT",
-   `/api/patient/${pid}/encounter/${encounterId}/soap_note/${noteId}`,
+   `/api/patient/${patientId}/encounter/${eid}/soap_note/${noteId}`,
    input,
   );
  };
 
  soapNotes = async (
-  client: OpenEMRClient,
   patientId: string,
   encounterId: string,
  ): Promise<Result<SoapNote[]>> => {
-  const [pid, pe] = await resolvePatientPid(client, patientId);
-  if (pe || !pid) return [null, pe];
+  const [eid, ee] = await resolveEncounterEid(
+   patientId,
+   encounterId,
+  );
+  if (ee || !eid) return [null, ee];
   try {
-   const notes = await client.standardGet<StandardResource>(
-    `/api/patient/${pid}/encounter/${encounterId}/soap_note`,
+   const notes = await this.standardGetOptional<StandardResource>(
+    `/api/patient/${patientId}/encounter/${eid}/soap_note`,
    );
    const authors = await findEmrAuthorsByPatient(patientId);
    return [
@@ -593,16 +690,18 @@ class EmrService {
  };
 
  soapNote = async (
-  client: OpenEMRClient,
   patientId: string,
   encounterId: string,
   noteId: string,
  ): Promise<Result<SoapNote>> => {
-  const [pid, pe] = await resolvePatientPid(client, patientId);
-  if (pe || !pid) return [null, pe];
+  const [eid, ee] = await resolveEncounterEid(
+   patientId,
+   encounterId,
+  );
+  if (ee || !eid) return [null, ee];
   try {
-   const notes = await client.standardGet<StandardResource>(
-    `/api/patient/${pid}/encounter/${encounterId}/soap_note/${noteId}`,
+   const notes = await this.standardGetOptional<StandardResource>(
+    `/api/patient/${patientId}/encounter/${eid}/soap_note/${noteId}`,
    );
    const note = notes[0];
    if (!note) return [{}, null];
@@ -619,11 +718,25 @@ class EmrService {
   }
  };
 
+ private standardGetOptional = async <T>(
+  path: string,
+ ): Promise<T[]> => {
+  const client = getOpenEMRClient();
+  try {
+   return await client.standardGet<T>(path);
+  } catch (e) {
+   if (e instanceof AppError && e.statusCode === HttpStatus.NOT_FOUND) {
+    return [];
+   }
+   throw e;
+  }
+ };
+
  private findMedicationUuid = async (
-  client: OpenEMRClient,
   pid: string,
   listId: unknown,
  ): Promise<string | undefined> => {
+  const client = getOpenEMRClient();
   try {
    await client.standardGet(`/api/patient/${pid}/medical_problem`);
    const meds = await client.standardGet<StandardResource>(
@@ -637,11 +750,11 @@ class EmrService {
  };
 
  private writeStandard = async (
-  client: OpenEMRClient,
   method: "POST" | "PUT" | "DELETE",
   path: string,
   body?: Record<string, unknown>,
  ): Promise<Result<StandardResource>> => {
+  const client = getOpenEMRClient();
   try {
    const result =
     method === "POST"

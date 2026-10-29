@@ -1,20 +1,17 @@
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import { z } from "zod";
-import type OpenEMRClient from "@module/openemr/client.ts";
-import {
- resolvePatientPid,
- resolvePatientScope,
-} from "@module/patient/helper.ts";
 import { resolveProviderId } from "@module/appointment/helper.ts";
 import { countParam } from "@shared/schemas/common.ts";
-import type { RequestActor } from "@module/auth/helper.ts";
+import type { PublicUser } from "@module/user/helper.ts";
 import APIError from "@error/APIError.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { setDefined } from "@shared/utils/object.ts";
 
-export type PrescriptionRecord = Record<string, unknown>;
-
-export type PrescriptionActor = RequestActor;
+type PrescriptionRecord = Record<string, unknown>;
 
 export const prescriptionListQuerySchema = z.object({
  patientId: z.string().optional(),
@@ -52,19 +49,16 @@ export const prescriptionBodySchema = z.object({
 });
 export type CreatePrescriptionInput = z.infer<typeof prescriptionBodySchema>;
 
-export type PrescriptionListResult = ListResult<PrescriptionRecord>;
+type PrescriptionListResult = ListResult<PrescriptionRecord>;
 
 class PrescriptionService {
  list = async (
-  client: OpenEMRClient,
   query: PrescriptionListQuery,
-  actor: PrescriptionActor,
+  user: PublicUser,
  ): Promise<Result<PrescriptionListResult>> => {
+  const client = getOpenEMRClient();
   try {
-   const [patientId, perr] = await resolvePatientScope(actor, query.patientId);
-   if (perr || !patientId) {
-    return [null, perr];
-   }
+   const patientId = (user.openemr.patientId ?? query.patientId)!;
 
    const params: Record<string, string | number> = {
     patient_uuid: patientId,
@@ -81,9 +75,9 @@ class PrescriptionService {
  };
 
  get = async (
-  client: OpenEMRClient,
   id: string,
  ): Promise<Result<PrescriptionRecord>> => {
+  const client = getOpenEMRClient();
   try {
    const [item] = await client.standardGet<PrescriptionRecord>(
     `/api/prescription/${id}`,
@@ -96,15 +90,14 @@ class PrescriptionService {
  };
 
  create = async (
-  client: OpenEMRClient,
   input: CreatePrescriptionInput,
  ): Promise<Result<PrescriptionRecord>> => {
+  const client = getOpenEMRClient();
   try {
-   const [[pid, pe], [providerId, perr]] = await Promise.all([
-    resolvePatientPid(client, input.patientId),
-    resolveProviderId(client, input.providerId),
-   ]);
-   if (pe || !pid) return [null, pe];
+   const pid = input.patientId;
+   const [providerId, perr] = await resolveProviderId(
+    input.providerId,
+   );
    if (perr || !providerId) return [null, perr];
 
    const payload = buildPrescriptionPayload(input, pid);
@@ -121,10 +114,10 @@ class PrescriptionService {
  };
 
  remove = async (
-  client: OpenEMRClient,
   id: string,
   patientUuid?: string,
  ): Promise<Result<PrescriptionRecord>> => {
+  const client = getOpenEMRClient();
   try {
    const [deleted] = await client.standardDelete<PrescriptionRecord>(
     `/api/prescription/${id}`,
@@ -135,7 +128,6 @@ class PrescriptionService {
    return [null, toError(e)];
   }
  };
-
 }
 
 function buildPrescriptionPayload(

@@ -1,14 +1,12 @@
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import { z } from "zod";
-import type OpenEMRClient from "@module/openemr/client.ts";
-import {
- resolvePatientPid,
- resolveOwnPatientId,
-} from "@module/patient/helper.ts";
-import type { RequestActor } from "@module/auth/helper.ts";
+import type { PublicUser } from "@module/user/helper.ts";
 import {
  findUserByPatientId,
  findUserByPractitionerId,
- findUserPractitionerId,
 } from "@module/user/helper.ts";
 import { recordEmrAuthor, recordEmrAuthors } from "@module/emr/helper.ts";
 import { notify } from "@module/notification/notification.service.ts";
@@ -17,12 +15,10 @@ import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { setDefined } from "@shared/utils/object.ts";
 
-export type LabRecord = Record<string, unknown>;
+type LabRecord = Record<string, unknown>;
 
 const asString = (v: unknown): string | undefined =>
  typeof v === "string" && v ? v : undefined;
-
-export type LabActor = RequestActor;
 
 export const labOrderListQuerySchema = z.object({
  patientId: z.string().optional(),
@@ -78,38 +74,24 @@ export const labResultBodySchema = z.object({
 });
 export type CreateLabResultInput = z.infer<typeof labResultBodySchema>;
 
-export type LabListResult = ListResult<LabRecord>;
+type LabListResult = ListResult<LabRecord>;
 
 class LabService {
  listOrders = async (
-  client: OpenEMRClient,
   query: LabOrderListQuery,
-  actor: LabActor,
+  user: PublicUser,
  ): Promise<Result<LabListResult>> => {
+  const client = getOpenEMRClient();
   try {
    const params: Record<string, string | number> = {};
-   if (actor.role === "patient") {
-    const [ownId, perr] = await resolveOwnPatientId(actor.userId);
-    if (perr || !ownId) return [null, perr];
-    const [pid, rperr] = await resolvePatientPid(client, ownId);
-    if (rperr || !pid) return [null, rperr];
-    params.patient_id = pid;
-   } else if (query.patientId) {
-    const [pid, perr] = await resolvePatientPid(client, query.patientId);
-    if (perr || !pid) return [null, perr];
-    params.patient_id = pid;
-   }
+   const pid =
+    user.openemr.patientPid ?? user.openemr.patientId ?? query.patientId;
+   if (pid) params.patient_id = pid;
    if (query.status) params.status = query.status;
 
-   let providerUuid: string | undefined;
-   if (actor.role !== "patient") {
-    const doctorUserId = query.doctorId ?? (actor.role === "doctor" ? actor.userId : undefined);
-    if (doctorUserId) {
-     const [uuid, derr] = await findUserPractitionerId(doctorUserId);
-     if (derr || !uuid) return [null, derr];
-     providerUuid = uuid;
-    }
-   }
+   const providerUuid = user.openemr.patientId
+    ? undefined
+    : (query.doctorId ?? user.openemr.practitionerId);
 
    let items = await client.standardGet<LabRecord>("/api/lab_order", params);
    if (providerUuid) {
@@ -122,13 +104,12 @@ class LabService {
  };
 
  createOrder = async (
-  client: OpenEMRClient,
   input: CreateLabOrderInput,
-  actor: LabActor,
+  user: PublicUser,
  ): Promise<Result<LabRecord>> => {
+  const client = getOpenEMRClient();
   try {
-   const [pid, perr] = await resolvePatientPid(client, input.patientId);
-   if (perr || !pid) return [null, perr];
+   const pid = user.openemr.patientPid ?? input.patientId;
 
    const payload: Record<string, unknown> = { patient_id: Number(pid) };
    const set = setDefined(payload);
@@ -148,7 +129,7 @@ class LabService {
    const patientUuid = asString(order.patient_uuid);
    const orderUuid = asString(order.order_uuid);
    if (patientUuid && orderUuid) {
-    await recordEmrAuthor(patientUuid, "lab_order", orderUuid, actor.userId);
+    await recordEmrAuthor(patientUuid, "lab_order", orderUuid, user.id);
    }
    return [order, null];
   } catch (e) {
@@ -157,36 +138,27 @@ class LabService {
  };
 
  listResults = async (
-  client: OpenEMRClient,
   query: LabResultListQuery,
-  actor: LabActor,
+  user: PublicUser,
  ): Promise<Result<LabListResult>> => {
+  const client = getOpenEMRClient();
   try {
    const params: Record<string, string | number> = {};
    if (query.orderId) params.order_id = query.orderId;
-   if (actor.role === "patient") {
-    const [ownId, perr] = await resolveOwnPatientId(actor.userId);
-    if (perr || !ownId) return [null, perr];
-    const [pid, rperr] = await resolvePatientPid(client, ownId);
-    if (rperr || !pid) return [null, rperr];
-    params.patient_id = pid;
-   } else if (query.patientId) {
-    const [pid, perr] = await resolvePatientPid(client, query.patientId);
-    if (perr || !pid) return [null, perr];
-    params.patient_id = pid;
-   }
+   const pid =
+    user.openemr.patientPid ?? user.openemr.patientId ?? query.patientId;
+   if (pid) params.patient_id = pid;
 
-   if (actor.role !== "patient") {
-    const doctorUserId = query.doctorId ?? (actor.role === "doctor" ? actor.userId : undefined);
-    if (doctorUserId) {
-     const [uuid, derr] = await findUserPractitionerId(doctorUserId);
-     if (derr || !uuid) return [null, derr];
-     params.provider_uuid = uuid;
-    }
-   }
+   const providerUuid = user.openemr.patientId
+    ? undefined
+    : (query.doctorId ?? user.openemr.practitionerId);
+   if (providerUuid) params.provider_uuid = providerUuid;
 
    if (!params.order_id && !params.patient_id && !params.provider_uuid) {
-    return [null, APIError.badRequest("orderId, patientId or doctorId is required")];
+    return [
+     null,
+     APIError.badRequest("orderId, patientId or doctorId is required"),
+    ];
    }
 
    const items = await client.standardGet<LabRecord>("/api/lab_result", params);
@@ -196,33 +168,31 @@ class LabService {
   }
  };
 
-  getResult = async (
-   client: OpenEMRClient,
-   resultId: string,
-   actor: LabActor,
-  ): Promise<Result<LabRecord>> => {
-   try {
-    const params: Record<string, string | number> = { result_uuid: resultId };
-    if (actor.role === "patient") {
-     const [ownId, perr] = await resolveOwnPatientId(actor.userId);
-     if (perr || !ownId) return [null, perr];
-     const [pid, rperr] = await resolvePatientPid(client, ownId);
-     if (rperr || !pid) return [null, rperr];
-     params.patient_id = pid;
-    }
-    const [item] = await client.standardGet<LabRecord>("/api/lab_result", params);
-    if (!item) return [null, APIError.notFound("Lab result not found")];
-    return [item, null];
-   } catch (e) {
-    return [null, toError(e)];
-   }
-  };
-
-  createResult = async (
-  client: OpenEMRClient,
-  input: CreateLabResultInput,
-  actor: LabActor,
+ getResult = async (
+  resultId: string,
+  user: PublicUser,
  ): Promise<Result<LabRecord>> => {
+  const client = getOpenEMRClient();
+  try {
+   const params: Record<string, string | number> = { result_uuid: resultId };
+   const pid = user.openemr.patientPid ?? user.openemr.patientId;
+   if (pid) params.patient_id = pid;
+   const [item] = await client.standardGet<LabRecord>(
+    "/api/lab_result",
+    params,
+   );
+   if (!item) return [null, APIError.notFound("Lab result not found")];
+   return [item, null];
+  } catch (e) {
+   return [null, toError(e)];
+  }
+ };
+
+ createResult = async (
+  input: CreateLabResultInput,
+  user: PublicUser,
+ ): Promise<Result<LabRecord>> => {
+  const client = getOpenEMRClient();
   try {
    const payload: Record<string, unknown> = {
     order_id: Number(input.orderId),
@@ -254,7 +224,7 @@ class LabService {
    if (patientUuid) {
     await recordEmrAuthors(
      patientUuid,
-     actor.userId,
+     user.id,
      results
       .map((r) => asString((r as LabRecord).result_uuid))
       .filter((id): id is string => Boolean(id))

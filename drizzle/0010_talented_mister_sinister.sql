@@ -1,0 +1,1 @@
+ALTER TABLE "app_users" ADD COLUMN "openemr_patient_pid" text;

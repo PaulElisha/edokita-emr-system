@@ -7,6 +7,7 @@ export const openemrTokens = pgTable("openemr_tokens", {
   .references(() => users.id, { onDelete: "cascade" }),
  accessToken: text("access_token").notNull(),
  refreshToken: text("refresh_token"),
+ refreshExpiresAt: timestamp("refresh_expires_at", { withTimezone: true }),
  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
  scope: text("scope"),
  subject: text("subject"),

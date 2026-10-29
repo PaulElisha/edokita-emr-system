@@ -2,6 +2,8 @@ FROM openemr/openemr:latest@sha256:086c92c5d94b112fb917763dde6c2bcb86cdddc5c5620
 
 COPY openemr/src/Services/LabService.php /var/www/localhost/htdocs/openemr/src/Services/LabService.php
 COPY openemr/src/RestControllers/LabRestController.php /var/www/localhost/htdocs/openemr/src/RestControllers/LabRestController.php
+COPY openemr/src/Services/ClinicalObservationService.php /var/www/localhost/htdocs/openemr/src/Services/ClinicalObservationService.php
+COPY openemr/src/RestControllers/ObservationRestController.php /var/www/localhost/htdocs/openemr/src/RestControllers/ObservationRestController.php
 
 COPY openemr/patches /tmp/edokita-patches
 RUN set -eux; \

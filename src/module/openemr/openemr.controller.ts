@@ -1,6 +1,6 @@
 import { Env } from "@/env.ts";
 import APIError from "@error/APIError.ts";
-import asyncHandler from "@middleware/async-handler.ts";
+import AsyncHandler from "@middleware/async-handler.ts";
 import type { AuthRequest, OpenEMRRequest } from "@shared/http.ts";
 import { requireUserId } from "@module/auth/helper.ts";
 import OpenEMRService, {
@@ -9,19 +9,19 @@ import OpenEMRService, {
 import type { Request, Response } from "express";
 
 class OpenEMRController {
- authorize = asyncHandler(async (req: AuthRequest, res: Response) => {
+ authorize = AsyncHandler(async (req: AuthRequest, res: Response) => {
   const [data, err] = await OpenEMRService.startAuthorization(requireUserId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });
 
- refresh = asyncHandler(async (req: AuthRequest, res: Response) => {
+ refresh = AsyncHandler(async (req: AuthRequest, res: Response) => {
   const [data, err] = await OpenEMRService.refresh(requireUserId(req));
   if (err) throw err;
   res.json({ success: true, data });
  });
 
- ping = asyncHandler(async (req: OpenEMRRequest, res: Response) => {
+ ping = AsyncHandler(async (req: OpenEMRRequest, res: Response) => {
   const data = await req.openemr.standardGet("/api/version");
   res.json({ success: true, data });
  });

@@ -12,13 +12,13 @@ import type {
   FhirReference,
 } from "@shared/types/fhir.ts";
 
-export interface NameParts {
+interface NameParts {
   given: string;
   family: string;
   fullName: string;
 }
 
-export interface MappedAddress {
+interface MappedAddress {
   line: string;
   city?: string;
   state?: string;
@@ -28,6 +28,7 @@ export interface MappedAddress {
 
 export interface MappedPatient extends NameParts {
   id?: string;
+  pid?: string;
   resourceType: string;
   gender?: string;
   birthDate?: string;
@@ -129,7 +130,7 @@ export function conceptText(concept?: FhirCodeableConcept): string | undefined {
   return concept.text ?? concept.coding?.[0]?.display ?? concept.coding?.[0]?.code;
 }
 
-export function normalizeName(name?: FhirHumanName[]): NameParts {
+function normalizeName(name?: FhirHumanName[]): NameParts {
   const official = name?.find((n) => n.use === "official") ?? name?.[0];
   if (!official) return { given: "", family: "", fullName: "" };
   return {
@@ -143,7 +144,7 @@ export function referenceId(ref?: FhirReference): string | undefined {
   return ref?.reference?.split("/").pop();
 }
 
-export function mapAddress(address?: FhirAddress): MappedAddress | undefined {
+function mapAddress(address?: FhirAddress): MappedAddress | undefined {
   if (!address) return undefined;
   return {
     line: address.line?.join(", ") ?? "",
@@ -160,6 +161,9 @@ export function mapPatient(patient: FhirPatient): MappedPatient {
   const email = patient.telecom?.find((t) => t.system === "email");
   return {
     id: patient.id,
+    pid: patient.identifier?.find(
+      (i) => i.system === IDENTIFIER_SYSTEM.patientPid,
+    )?.value,
     resourceType: patient.resourceType,
     ...name,
     gender: patient.gender,
@@ -275,7 +279,12 @@ export function mapClinical(
   };
 }
 
-const TERMINAL_APPOINTMENT_STATUSES = new Set([
+const PRESERVED_APPOINTMENT_STATUSES = new Set([
+ "pending",
+ "proposed",
+ "waitlist",
+ "arrived",
+ "checked-in",
  "cancelled",
  "noshow",
  "entered-in-error",
@@ -284,7 +293,7 @@ const TERMINAL_APPOINTMENT_STATUSES = new Set([
 
 function appointmentStatus(a: FhirAppointment): string | undefined {
  if (!a.status) return undefined;
- if (TERMINAL_APPOINTMENT_STATUSES.has(a.status)) return a.status;
+ if (PRESERVED_APPOINTMENT_STATUSES.has(a.status)) return a.status;
  const at = a.end ?? a.start;
  if (!at) return a.status;
  return isBefore(new Date(at), new Date()) ? "fulfilled" : "booked";

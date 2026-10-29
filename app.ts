@@ -8,6 +8,7 @@ import appointmentRouter from "@module/appointment/appointment.route.ts";
 import authRouter from "@module/auth/auth.route.ts";
 import doctorRouter from "@module/doctor/doctor.route.ts";
 import emrRouter from "@module/emr/emr.route.ts";
+import emrAccessRouter from "@module/emr-access/emr-access.route.ts";
 import labRouter from "@module/lab/lab.route.ts";
 import messagingRouter from "@module/messaging/messaging.route.ts";
 import notificationRouter from "@module/notification/notification.route.ts";
@@ -32,12 +33,17 @@ class App {
   this.app = express();
   this.app.disable("x-powered-by");
   this.app.set("trust proxy", 1);
+  this.app.set("etag", false);
   this.initializeMiddlewares();
   this.initializeRoutes();
  }
 
  initializeMiddlewares() {
   this.app.use(cors);
+  this.app.use("/api", (_req, res, next) => {
+   res.setHeader("Cache-Control", "no-store");
+   next();
+  });
   this.app.use(pinoHttp({ logger }));
   this.app.use(helmet);
   this.app.use(express.urlencoded({ limit: "10mb", extended: true }));
@@ -69,6 +75,7 @@ class App {
   this.app.use("/api/patients", patientRouter);
   this.app.use("/api/appointments", appointmentRouter);
   this.app.use("/api/emr", emrRouter);
+  this.app.use("/api/emr-access", emrAccessRouter);
   this.app.use("/api/lab", labRouter);
   this.app.use("/api/prescriptions", prescriptionRouter);
   this.app.use("/api/schedules", scheduleRouter);

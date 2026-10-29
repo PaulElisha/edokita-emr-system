@@ -1,3 +1,7 @@
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import {
  mapPatient,
  mapPractitioner,
@@ -7,8 +11,7 @@ import {
  createdResourceId,
  type OpenEMRCreateResult,
  type QueryValue,
-} from "@module/openemr/client.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
+} from "../../config/openemr-client/client.ts";
 import APIError from "@error/APIError.ts";
 import {
  applyPractitionerProfile,
@@ -35,7 +38,7 @@ export const doctorListQuerySchema = fhirListQuerySchema.extend({
 });
 export type DoctorListQuery = z.infer<typeof doctorListQuerySchema>;
 
-export const doctorAddressSchema = z.object({
+const doctorAddressSchema = z.object({
  street: z.string().optional(),
  street2: z.string().optional(),
  city: z.string().optional(),
@@ -43,7 +46,6 @@ export const doctorAddressSchema = z.object({
  zip: z.string().optional(),
  country: z.string().optional(),
 });
-export type DoctorAddressInput = z.infer<typeof doctorAddressSchema>;
 
 export const doctorBodySchema = nameSchema.merge(contactSchema).extend({
  suffix: z.string().optional(),
@@ -61,13 +63,13 @@ export const doctorBodySchema = nameSchema.merge(contactSchema).extend({
 });
 export type CreateDoctorInput = z.infer<typeof doctorBodySchema>;
 
-export type DoctorListResult = ListResult<MappedPractitioner>;
+type DoctorListResult = ListResult<MappedPractitioner>;
 
 class DoctorService {
  list = async (
-  client: OpenEMRClient,
   query: DoctorListQuery,
  ): Promise<Result<DoctorListResult>> => {
+  const client = getOpenEMRClient();
   try {
    const params: Record<string, QueryValue> = {
     _count: query._count,
@@ -92,9 +94,9 @@ class DoctorService {
  };
 
  get = async (
-  client: OpenEMRClient,
   id: string,
  ): Promise<Result<MappedPractitioner>> => {
+  const client = getOpenEMRClient();
   try {
    const doctor = await client.fhirRead<FhirPractitioner>("Practitioner", id);
    const profiles = await fetchPractitionerProfiles();
@@ -105,9 +107,9 @@ class DoctorService {
  };
 
  create = async (
-  client: OpenEMRClient,
   input: CreateDoctorInput,
  ): Promise<Result<MappedPractitioner>> => {
+  const client = getOpenEMRClient();
   try {
    const created = await client.fhirCreate<
     FhirPractitioner | OpenEMRCreateResult
@@ -135,10 +137,10 @@ class DoctorService {
  };
 
  update = async (
-  client: OpenEMRClient,
   id: string,
   input: CreateDoctorInput,
  ): Promise<Result<MappedPractitioner>> => {
+  const client = getOpenEMRClient();
   try {
    const updated = await client.fhirUpdate<FhirPractitioner>(
     "Practitioner",
@@ -152,33 +154,33 @@ class DoctorService {
   }
  };
 
-  myPatients = async (
-   client: OpenEMRClient,
-   userId: string,
-  ): Promise<Result<PatientListResult>> => {
-   try {
-    const [ids, err] = await findConnectedPatientIds(client, userId);
-    if (err || !ids) return [null, err];
-    if (ids.length === 0) return [{ total: 0, items: [] }, null];
+ myPatients = async (
+  userId: string,
+ ): Promise<Result<PatientListResult>> => {
+  const client = getOpenEMRClient();
+  try {
+   const [ids, err] = await findConnectedPatientIds( userId);
+   if (err || !ids) return [null, err];
+   if (ids.length === 0) return [{ total: 0, items: [] }, null];
 
-    const bundles = await Promise.all(
-     chunk(ids, PATIENT_ID_CHUNK).map((group) =>
-      client.fhirSearch("Patient", {
-       _id: group.join(","),
-       _count: group.length,
-      }),
-     ),
-    );
-    const items = bundles
-     .flatMap((bundle) => bundle.entry ?? [])
-     .map((e) => e.resource as FhirPatient)
-     .filter((r) => r?.resourceType === "Patient")
-     .map(mapPatient);
-    return [{ total: items.length, items }, null];
-   } catch (e) {
-    return [null, toError(e, "myPatients")];
-   }
-  };
+   const bundles = await Promise.all(
+    chunk(ids, PATIENT_ID_CHUNK).map((group) =>
+     client.fhirSearch("Patient", {
+      _id: group.join(","),
+      _count: group.length,
+     }),
+    ),
+   );
+   const items = bundles
+    .flatMap((bundle) => bundle.entry ?? [])
+    .map((e) => e.resource as FhirPatient)
+    .filter((r) => r?.resourceType === "Patient")
+    .map(mapPatient);
+   return [{ total: items.length, items }, null];
+  } catch (e) {
+   return [null, toError(e, "myPatients")];
+  }
+ };
 }
 
 export default new DoctorService();

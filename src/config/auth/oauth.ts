@@ -1,3 +1,5 @@
+/** @format */
+
 import { OpenEMR } from "@/env.ts";
 import {
  allowInsecureRequests,

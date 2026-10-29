@@ -1,18 +1,21 @@
-import type { JwtPayload } from "@auth/jwt.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
+/** @format */
+
+import type { AuthUser } from "@module/user/helper.ts";
+import type OpenEMRClient from "../config/openemr-client/client.ts";
 import type { Request } from "express";
-import type { ParamsDictionary, Query } from "express-serve-static-core";
+
+export type { AuthUser };
 
 export type AuthRequest<
- P = ParamsDictionary,
+ P = Request["params"],
  ResBody = unknown,
  ReqBody = unknown,
- ReqQuery = Query,
-> = Request<P, ResBody, ReqBody, ReqQuery> & { user: JwtPayload };
+ ReqQuery = Request["query"],
+> = Request<P, ResBody, ReqBody, ReqQuery> & { user: AuthUser };
 
 export type OpenEMRRequest<
- P = ParamsDictionary,
+ P = Request["params"],
  ResBody = unknown,
  ReqBody = unknown,
- ReqQuery = Query,
+ ReqQuery = Request["query"],
 > = AuthRequest<P, ResBody, ReqBody, ReqQuery> & { openemr: OpenEMRClient };

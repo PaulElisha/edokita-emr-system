@@ -1,6 +1,6 @@
 --- a/src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php
 +++ b/src/Common/Auth/OpenIDConnect/Entities/ServerScopeListEntity.php
-@@ -277,6 +277,8 @@
+@@ -277,10 +277,13 @@
                  ,'insurance' => ['c','r','u','s']
                  ,'insurance_company' => ['c','r','u','s']
                  ,'insurance_type' => ['s']
@@ -9,7 +9,20 @@
                  ,'list' => ['r']
                  ,'medical_problem' => ['c','r','u','d','s']
                  ,'medication' => ['c','r','u','d','s']
-@@ -408,6 +410,8 @@
+                 ,'message' => ['c','u','d']
++                ,'observation' => ['c','r','u','d','s']
+                 ,'patient' => ['c','r','u','s']
+                 ,'practitioner' => ['c','r','u','s']
+                 ,'prescription' => ['c','r','d','s']
+@@ -303,6 +306,7 @@
+                 'patient' => ['s']
+                 ,'encounter' => ['r','s']
+                 ,'appointment' => ['r','s']
++                ,'observation' => ['r','s']
+             ];
+             foreach ($patientResources as $resource => $actions) {
+                 $actionString = implode('', $actions);
+@@ -408,10 +412,13 @@
              'insurance' => xl("insurance information including coverage, policy, and subscriber information"),
              'insurance_company' => xl("insurance company information including name, contact information, and address"),
              'insurance_type' => xl("insurance type information including name, contact information, and address"),
@@ -18,3 +31,8 @@
              'list' => xl("lists including problem lists, medication lists, and allergy lists"),
              'medical_problem' => xl("medical problems including health concerns, problems, and encounter diagnoses"),
              'medication' => xl("drug information related to planned and prescribed medication history"),
+             'message' => xl("messages including patient messages, clinical messages, and administrative messages"),
++            'observation' => xl("clinical observations including surveys, examinations, social history, and other findings"),
+             'patient' => xl("patient basic demographics including names,communication preferences,race,ethnicity,birth sex,previous names and other administrative information"),
+             'practitioner' => xl("practitioner role for a practitioner (including speciality, location, contact information)"),
+             'prescription' => xl("prescriptions including medication, dosage, and instructions"),

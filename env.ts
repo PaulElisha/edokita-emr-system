@@ -48,6 +48,7 @@ const EnvSchema = z.object({
  OPENEMR_DEFAULT_BILLING_LOCATION: z.string().default("3"),
  OPENEMR_WORKING_HOURS_START: z.string().default("09:00"),
  OPENEMR_WORKING_HOURS_END: z.string().default("17:00"),
+ EMR_ACCESS_TTL_HOURS: z.coerce.number().int().positive().default(24),
 
  DATABASE_URL: z
   .string()
@@ -58,7 +59,7 @@ const EnvSchema = z.object({
 
  TOKEN_ENCRYPTION_KEY: z.string().optional(),
 });
-export type EnvType = z.infer<typeof EnvSchema>;
+type EnvType = z.infer<typeof EnvSchema>;
 let Env: EnvType;
 
 try {
@@ -120,8 +121,6 @@ if (!Env.OPENEMR_CLIENT_SECRET) {
 }
 
 export const isProd = () => Env.APP_STAGE === "prod";
-export const isDev = () => Env.APP_STAGE === "dev";
-export const isTest = () => Env.APP_STAGE === "test";
 
 export { Env, OpenEMR };
 export default Env;

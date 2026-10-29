@@ -1,3 +1,5 @@
+/** @format */
+
 import { Env } from "@/env.ts";
 import type { UserRole } from "@db/schema/role.ts";
 import { readFileSync } from "node:fs";
@@ -74,7 +76,7 @@ export async function verifyAppToken(token: string): Promise<JwtPayload> {
 }
 
 export function decodeJwtPayload(
- token?: string,
+ token: string,
 ): Record<string, unknown> | null {
  try {
   return token ? decodeJwt(token) : null;

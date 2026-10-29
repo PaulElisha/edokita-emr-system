@@ -1,38 +1,21 @@
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import APIError from "@error/APIError.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
 import type { CreatePatientInput } from "@module/patient/patient.service.ts";
-import type { FhirPatient } from "@shared/types/fhir.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { buildContactPoints, buildHumanName } from "@shared/utils/fhir.ts";
-import { findUserById } from "@module/user/helper.ts";
-import type { RequestActor } from "@module/auth/helper.ts";
 
-const PID_SYSTEM = "http://terminology.hl7.org/CodeSystem/v2-0203";
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export async function resolvePatientPid(
- client: OpenEMRClient,
- patientUuid: string,
-): Promise<Result<string>> {
- try {
-  if (/^\d+$/.test(patientUuid)) return [patientUuid, null];
-  const patient = await client.fhirRead<FhirPatient>("Patient", patientUuid);
-  const pid = patient.identifier?.find((i) => i.system === PID_SYSTEM)?.value;
-  if (!pid) {
-   return [null, APIError.badRequest("Could not resolve the patient's EMR id")];
-  }
-  return [pid, null];
- } catch (e) {
-  return [null, toError(e)];
- }
-}
+const UUID_RE =
+ /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function resolveEncounterEid(
- client: OpenEMRClient,
  patientId: string,
  encounterUuid: string,
 ): Promise<Result<string>> {
+ const client = getOpenEMRClient();
  try {
   if (/^\d+$/.test(encounterUuid)) return [encounterUuid, null];
   if (!UUID_RE.test(encounterUuid)) return [encounterUuid, null];
@@ -53,31 +36,7 @@ export async function resolveEncounterEid(
  }
 }
 
-export async function resolveOwnPatientId(
- userId: string,
-): Promise<Result<string>> {
- const [user, err] = await findUserById(userId);
- if (err || !user) return [null, err];
- const patientId = user.openemr.patientId;
- if (!patientId) {
-  return [
-   null,
-   APIError.badRequest("Your account is not linked to an OpenEMR patient record"),
-  ];
- }
- return [patientId, null];
-}
-
-export async function resolvePatientScope(
- actor: RequestActor,
- requested?: string,
-): Promise<Result<string>> {
- if (actor.role === "patient") return resolveOwnPatientId(actor.userId);
- if (!requested) return [null, APIError.badRequest("patientId is required")];
- return [requested, null];
-}
-
-export const GENDER_MAP: Record<string, string> = {
+const GENDER_MAP: Record<string, string> = {
  male: "male",
  m: "male",
  M: "male",

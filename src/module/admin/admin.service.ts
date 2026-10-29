@@ -1,10 +1,13 @@
-import type OpenEMRClient from "@module/openemr/client.ts";
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import { countResources } from "@module/admin/helper.ts";
-import { listOpenEMRUsers } from "@module/openemr/helpers.ts";
+import { listOpenEMRUsers } from "@module/openemr/helper.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 
-export interface AdminStats {
+interface AdminStats {
  patients: number;
  practitioners: number;
  appointments: number;
@@ -13,19 +16,12 @@ export interface AdminStats {
  medications: number;
 }
 
-export type AdminUser = Record<string, unknown>;
+type AdminUser = Record<string, unknown>;
 
-export type AdminFacility = Record<string, unknown>;
-
-export interface CreateAdminInput {
- fname?: string;
- lname?: string;
- email?: string;
- phone?: string;
-}
+type AdminFacility = Record<string, unknown>;
 
 class AdminService {
- stats = async (client: OpenEMRClient): Promise<Result<AdminStats>> => {
+ stats = async (): Promise<Result<AdminStats>> => {
   const [
    patients,
    practitioners,
@@ -34,12 +30,12 @@ class AdminService {
    conditions,
    medications,
   ] = await Promise.all([
-   countResources(client, "Patient"),
-   countResources(client, "Practitioner"),
-   countResources(client, "Appointment"),
-   countResources(client, "Encounter"),
-   countResources(client, "Condition"),
-   countResources(client, "MedicationRequest"),
+   countResources( "Patient"),
+   countResources( "Practitioner"),
+   countResources( "Appointment"),
+   countResources( "Encounter"),
+   countResources( "Condition"),
+   countResources( "MedicationRequest"),
   ]);
 
   const err =
@@ -64,18 +60,18 @@ class AdminService {
   ];
  };
 
-  users = async (client: OpenEMRClient): Promise<Result<AdminUser[]>> => {
-   try {
-    const users = await listOpenEMRUsers(client);
-    return [users as unknown as AdminUser[], null];
-   } catch (e) {
-    return [null, toError(e, "listOpenEMRUsers")];
-   }
-  };
+ users = async (): Promise<Result<AdminUser[]>> => {
+  try {
+   const users = await listOpenEMRUsers();
+   return [users as unknown as AdminUser[], null];
+  } catch (e) {
+   return [null, toError(e, "listOpenEMRUsers")];
+  }
+ };
 
  facilities = async (
-  client: OpenEMRClient,
  ): Promise<Result<AdminFacility[]>> => {
+  const client = getOpenEMRClient();
   try {
    const facilities = await client.standardGet<AdminFacility>("/api/facility");
    return [facilities, null];

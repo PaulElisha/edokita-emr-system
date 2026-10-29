@@ -1,0 +1,81 @@
+--- a/apis/routes/_rest_routes_standard.inc.php
++++ b/apis/routes/_rest_routes_standard.inc.php
+@@ -34,8 +34,10 @@
+ use OpenEMR\RestControllers\ImmunizationRestController;
+ use OpenEMR\RestControllers\InsuranceCompanyRestController;
+ use OpenEMR\RestControllers\InsuranceRestController;
++use OpenEMR\RestControllers\LabRestController;
+ use OpenEMR\RestControllers\ListRestController;
+ use OpenEMR\RestControllers\MessageRestController;
++use OpenEMR\RestControllers\ObservationRestController;
+ use OpenEMR\RestControllers\PatientRestController;
+ use OpenEMR\RestControllers\PractitionerRestController;
+ use OpenEMR\RestControllers\PrescriptionRestController;
+@@ -510,9 +512,67 @@
+     "GET /api/patient/:pid/document/:did" => function ($pid, $did, HttpRestRequest $request) {
+         RestConfig::request_authorization_check($request, "patients", "docs");
+         $return = (new DocumentRestController())->downloadFile($pid, $did);
++
++        return $return;
++    },
++    "GET /api/lab_order" => function (HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab");
++        $return = (new LabRestController())->getOrders($request, $request->query->all());
++
++        return $return;
++    },
++    "POST /api/lab_order" => function (HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab", 'write');
++        $data = (array) (json_decode(file_get_contents("php://input"), true));
++        $return = (new LabRestController())->createOrder($request, $data);
++
++        return $return;
++    },
++    "GET /api/lab_result" => function (HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab");
++        $return = (new LabRestController())->getResults($request, $request->query->all());
++
++        return $return;
++    },
++    "POST /api/lab_result" => function (HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab");
++        $data = (array) (json_decode(file_get_contents("php://input"), true));
++        $return = (new LabRestController())->createResult($request, $data);
++
++        return $return;
++    },
++    "GET /api/observation" => function (HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab");
++        $return = (new ObservationRestController())->getObservations($request, $request->query->all());
+ 
+         return $return;
+     },
++    "POST /api/observation" => function (HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab", 'write');
++        $data = (array) (json_decode(file_get_contents("php://input"), true));
++        $return = (new ObservationRestController())->createObservation($request, $data);
++
++        return $return;
++    },
++    "GET /api/observation/:observation_uuid" => function ($observation_uuid, HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab");
++        $return = (new ObservationRestController())->getObservation($request, $observation_uuid);
++
++        return $return;
++    },
++    "PUT /api/observation/:observation_uuid" => function ($observation_uuid, HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab", 'write');
++        $data = (array) (json_decode(file_get_contents("php://input"), true));
++        $return = (new ObservationRestController())->updateObservation($request, $observation_uuid, $data);
++
++        return $return;
++    },
++    "DELETE /api/observation/:observation_uuid" => function ($observation_uuid, HttpRestRequest $request) {
++        RestConfig::request_authorization_check($request, "patients", "lab", 'write');
++        $return = (new ObservationRestController())->deleteObservation($request, $observation_uuid);
++
++        return $return;
++    },
+     "GET /api/patient/:puuid/employer" => function ($puuid, HttpRestRequest $request) {
+         if (!UuidRegistry::isValidStringUUID($puuid)) {
+             $errorReturn = [

@@ -17,6 +17,7 @@ export const users = pgTable("app_users", {
  openemrSubject: text("openemr_subject"),
  openemrFhirUser: text("openemr_fhir_user"),
  openemrPatientId: text("openemr_patient_id"),
+ openemrPatientPid: text("openemr_patient_pid"),
  openemrPractitionerId: text("openemr_practitioner_id"),
  openemrUsername: text("openemr_username"),
  openemrPassword: text("openemr_password"),

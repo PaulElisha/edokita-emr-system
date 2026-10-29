@@ -7,6 +7,7 @@ import {
  patientListQuerySchema,
 } from "@module/patient/patient.service.ts";
 import { idParamSchema } from "@shared/schemas/params.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class PatientRouter {
@@ -21,6 +22,7 @@ class PatientRouter {
   this.router.get(
    "/",
    authenticate,
+   validate(authUserSchema, "user"),
    withOpenEMR,
    requireRole("admin"),
    validate(patientListQuerySchema, "query"),
@@ -29,6 +31,7 @@ class PatientRouter {
   this.router.get(
    "/:id",
    authenticate,
+   validate(authUserSchema, "user"),
    withOpenEMR,
    requireRole("admin", "doctor"),
    validate(idParamSchema, "params"),
@@ -37,6 +40,7 @@ class PatientRouter {
   this.router.post(
    "/",
    authenticate,
+   validate(authUserSchema, "user"),
    withOpenEMR,
    requireRole("admin"),
    validate(patientBodySchema),
@@ -45,6 +49,7 @@ class PatientRouter {
   this.router.put(
    "/:id",
    authenticate,
+   validate(authUserSchema, "user"),
    withOpenEMR,
    requireRole("admin", "patient"),
    validate(idParamSchema, "params"),

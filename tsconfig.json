@@ -18,6 +18,9 @@
       "@auth/*": [
         "./src/config/auth/*"
       ],
+      "@openemr/*": [
+        "./src/config/openemr-client/*"
+      ],
       "@db/*": [
         "./src/config/db/*"
       ],
@@ -37,7 +40,10 @@
         "./src/shared/enum/*"
       ]
     },
-    "types": ["node", "fhir"],
+    "types": [
+      "node",
+      "fhir"
+    ],
     "strict": true,
     "noEmit": true,
     "target": "ES2022",

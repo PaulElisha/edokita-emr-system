@@ -1,9 +1,9 @@
 import type { NextFunction, Request, Response } from "express";
 import type { ZodType } from "zod";
 
-export type ValidationSource = "body" | "params" | "query";
+type ValidationSource = "body" | "params" | "query" | "user";
 
-export const validate = <T extends ZodType>(
+const validate = <T extends ZodType>(
  schema: T,
  source: ValidationSource = "body",
 ) => {

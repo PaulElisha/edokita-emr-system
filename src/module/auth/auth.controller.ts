@@ -1,4 +1,6 @@
-import asyncHandler from "@middleware/async-handler.ts";
+/** @format */
+
+import AsyncHandler from "@middleware/async-handler.ts";
 import AuthService, {
  type ChangePasswordInput,
  type ForgotPasswordInput,
@@ -13,7 +15,7 @@ import type { AuthRequest } from "@shared/http.ts";
 import type { Request, Response } from "express";
 
 class AuthController {
- register = asyncHandler(
+ register = AsyncHandler(
   async (req: Request<unknown, unknown, RegisterInput>, res: Response) => {
    const [data, err] = await AuthService.register(req.body);
    if (err) throw err;
@@ -21,7 +23,7 @@ class AuthController {
   },
  );
 
- login = asyncHandler(
+ login = AsyncHandler(
   async (req: Request<unknown, unknown, LoginInput>, res: Response) => {
    const [data, err] = await AuthService.login(req.body);
    if (err) throw err;
@@ -29,13 +31,13 @@ class AuthController {
   },
  );
 
- logout = asyncHandler(async (req: AuthRequest, res: Response) => {
+ logout = AsyncHandler(async (req: AuthRequest, res: Response) => {
   const [data, err] = await AuthService.logout(requireUserId(req));
   if (err) throw err;
   res.json(data);
  });
 
- refresh = asyncHandler(
+ refresh = AsyncHandler(
   async (req: Request<unknown, unknown, RefreshTokenInput>, res: Response) => {
    const [data, err] = await AuthService.refresh(req.body);
    if (err) throw err;
@@ -43,18 +45,21 @@ class AuthController {
   },
  );
 
- changePassword = asyncHandler(
+ changePassword = AsyncHandler(
   async (
    req: AuthRequest<unknown, unknown, ChangePasswordInput>,
    res: Response,
   ) => {
-   const [data, err] = await AuthService.changePassword(requireUserId(req), req.body);
+   const [data, err] = await AuthService.changePassword(
+    requireUserId(req),
+    req.body,
+   );
    if (err) throw err;
    res.json({ success: true, data });
   },
  );
 
- forgotPassword = asyncHandler(
+ forgotPassword = AsyncHandler(
   async (
    req: Request<unknown, unknown, ForgotPasswordInput>,
    res: Response,
@@ -65,7 +70,7 @@ class AuthController {
   },
  );
 
- resetPassword = asyncHandler(
+ resetPassword = AsyncHandler(
   async (req: Request<unknown, unknown, ResetPasswordInput>, res: Response) => {
    const [data, err] = await AuthService.resetPassword(req.body);
    if (err) throw err;

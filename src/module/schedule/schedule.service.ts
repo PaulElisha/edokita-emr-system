@@ -2,20 +2,18 @@
 
 import { z } from "zod";
 import { db } from "@db/db.ts";
-import { withTransaction } from "@db/transaction.ts";
+import { Transactional } from "@db/transaction.ts";
 import { providerSchedules } from "@db/schema/appointment.ts";
 import type { Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { eq } from "drizzle-orm";
 import { toEntry, type ScheduleEntry } from "@module/schedule/helper.ts";
 
-export type { ScheduleEntry, WorkingHours } from "@module/schedule/helper.ts";
-
-export const timeSchema = z
+const timeSchema = z
  .string()
  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:mm");
 
-export const scheduleEntrySchema = z
+const scheduleEntrySchema = z
  .object({
   weekday: z.coerce.number().int().min(0).max(6),
   startTime: timeSchema,
@@ -26,7 +24,6 @@ export const scheduleEntrySchema = z
   message: "startTime must be before endTime",
   path: ["startTime"],
  });
-export type ScheduleEntryInput = z.infer<typeof scheduleEntrySchema>;
 
 export const scheduleBodySchema = z.object({
  entries: z.array(scheduleEntrySchema),
@@ -51,32 +48,38 @@ class ScheduleService {
   }
  };
 
- updateSchedule = async (
+ async updateSchedule(
   practitionerId: string,
   input: UpdateScheduleInput,
- ): Promise<Result<ScheduleEntry[]>> => {
+ ): Promise<Result<ScheduleEntry[]>> {
   try {
-   await withTransaction(async (tx) => {
-    await tx
-     .delete(providerSchedules)
-     .where(eq(providerSchedules.practitionerId, practitionerId));
-    if (input.entries.length > 0) {
-     await tx.insert(providerSchedules).values(
-      input.entries.map((e) => ({
-       practitionerId,
-       weekday: e.weekday,
-       startTime: e.startTime,
-       endTime: e.endTime,
-       slotMinutes: e.slotMinutes ?? 30,
-      })),
-     );
-    }
-   });
+   await this.replaceSchedule(practitionerId, input);
    return this.list(practitionerId);
   } catch (e) {
    return [null, toError(e)];
   }
- };
+ }
+
+ @Transactional()
+ private async replaceSchedule(
+  practitionerId: string,
+  input: UpdateScheduleInput,
+ ): Promise<void> {
+  await db
+   .delete(providerSchedules)
+   .where(eq(providerSchedules.practitionerId, practitionerId));
+  if (input.entries.length > 0) {
+   await db.insert(providerSchedules).values(
+    input.entries.map((e) => ({
+     practitionerId,
+     weekday: e.weekday,
+     startTime: e.startTime,
+     endTime: e.endTime,
+     slotMinutes: e.slotMinutes ?? 30,
+    })),
+   );
+  }
+ }
 }
 
 export default new ScheduleService();

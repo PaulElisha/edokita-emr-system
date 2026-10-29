@@ -6,7 +6,7 @@ db="${MYSQL_DATABASE:-openemr}"
 root_pw="${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}"
 client="${OPENEMR_CLIENT_ID:?OPENEMR_CLIENT_ID is required}"
 
-required_scopes="user/lab_order.crus user/lab_result.crus"
+required_scopes="user/lab_order.crus user/lab_result.crus user/observation.cruds user/observation.rs patient/observation.rs"
 
 query() { mysql -h "$host" -uroot -p"$root_pw" -N -B "$db" -e "$1"; }
 

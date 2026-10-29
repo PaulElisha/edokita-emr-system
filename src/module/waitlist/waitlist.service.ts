@@ -1,18 +1,13 @@
 import { z } from "zod";
 import { db } from "@db/db.ts";
 import { appointmentWaitlist } from "@db/schema/appointment.ts";
-import type { RequestActor } from "@module/auth/helper.ts";
-import {
- resolveOwnPatientId,
- resolvePatientScope,
-} from "@module/patient/helper.ts";
+import type { PublicUser } from "@module/user/helper.ts";
 import APIError from "@error/APIError.ts";
 import { countParam } from "@shared/schemas/common.ts";
 import type { ListResult, Result } from "@shared/types.ts";
 import { toError } from "@shared/error/error.ts";
 import { and, desc, eq } from "drizzle-orm";
 
-export type WaitlistActor = RequestActor;
 
 export const waitlistBodySchema = z
  .object({
@@ -37,22 +32,19 @@ export const waitlistQuerySchema = z.object({
 });
 export type WaitlistQuery = z.infer<typeof waitlistQuerySchema>;
 
-export type WaitlistEntry = typeof appointmentWaitlist.$inferSelect;
-export type WaitlistListResult = ListResult<WaitlistEntry>;
+type WaitlistEntry = typeof appointmentWaitlist.$inferSelect;
+type WaitlistListResult = ListResult<WaitlistEntry>;
 
 class WaitlistService {
  list = async (
   query: WaitlistQuery,
-  actor: WaitlistActor,
+  user: PublicUser,
  ): Promise<Result<WaitlistListResult>> => {
   try {
    const conditions = [];
-   if (actor.role === "patient") {
-    const [patientId, err] = await resolveOwnPatientId(actor.userId);
-    if (err || !patientId) return [null, err];
+   const patientId = user.openemr.patientId ?? query.patientId;
+   if (patientId) {
     conditions.push(eq(appointmentWaitlist.patientId, patientId));
-   } else if (query.patientId) {
-    conditions.push(eq(appointmentWaitlist.patientId, query.patientId));
    }
    if (query.status) {
     conditions.push(eq(appointmentWaitlist.status, query.status));
@@ -73,11 +65,10 @@ class WaitlistService {
 
  create = async (
   input: CreateWaitlistInput,
-  actor: WaitlistActor,
+  user: PublicUser,
  ): Promise<Result<WaitlistEntry>> => {
   try {
-   const [patientId, perr] = await resolvePatientScope(actor, input.patientId);
-   if (perr || !patientId) return [null, perr];
+   const patientId = (user.openemr.patientId ?? input.patientId)!;
 
    const [row] = await db
     .insert(appointmentWaitlist)
@@ -97,7 +88,7 @@ class WaitlistService {
 
  remove = async (
   id: string,
-  actor: WaitlistActor,
+  user: PublicUser,
  ): Promise<Result<{ success: true }>> => {
   try {
    const [row] = await db
@@ -107,12 +98,8 @@ class WaitlistService {
     .limit(1);
    if (!row) return [null, APIError.notFound("Waitlist entry not found")];
 
-   if (actor.role === "patient") {
-    const [own, err] = await resolveOwnPatientId(actor.userId);
-    if (err || !own) return [null, err];
-    if (row.patientId !== own) {
-     return [null, APIError.notFound("Waitlist entry not found")];
-    }
+   if (user.openemr.patientId && row.patientId !== user.openemr.patientId) {
+    return [null, APIError.notFound("Waitlist entry not found")];
    }
 
    await db.delete(appointmentWaitlist).where(eq(appointmentWaitlist.id, id));

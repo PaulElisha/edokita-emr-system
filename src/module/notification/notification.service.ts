@@ -9,7 +9,7 @@ import { unique } from "@shared/utils/array.ts";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
-export type NotificationRow = typeof notifications.$inferSelect;
+type NotificationRow = typeof notifications.$inferSelect;
 
 export interface NotifyInput {
  type: string;

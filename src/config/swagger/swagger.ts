@@ -18,6 +18,7 @@ import {
 import {
  appointmentBodySchema,
  appointmentListQuerySchema,
+ appointmentRescheduleSchema,
  appointmentUpdateSchema,
  slotsQuerySchema,
 } from "@module/appointment/appointment.service.ts";
@@ -36,6 +37,12 @@ import {
  soapNoteBodySchema,
  vitalsBodySchema,
 } from "@module/emr/emr.service.ts";
+import {
+ emrAccessPatientParamSchema,
+ emrAccessRequestParamSchema,
+ emrAccessRequestSchema,
+ emrAccessReviewSchema,
+} from "@module/emr-access/emr-access.service.ts";
 import {
  prescriptionBodySchema,
  prescriptionListQuerySchema,
@@ -263,7 +270,23 @@ const spec = {
     properties: {
      id: { type: "string" },
      resourceType: { type: "string", example: "Appointment" },
-     status: { type: "string" },
+     status: {
+      type: "string",
+      enum: [
+       "proposed",
+       "pending",
+       "awaiting-payment",
+       "booked",
+       "rescheduled",
+       "arrived",
+       "fulfilled",
+       "cancelled",
+       "noshow",
+       "entered-in-error",
+       "checked-in",
+       "waitlist",
+      ],
+     },
      start: { type: "string", format: "date-time" },
      end: { type: "string", format: "date-time" },
      type: { type: "string" },
@@ -607,7 +630,7 @@ const spec = {
    post: {
     tags: ["Appointments"],
     summary:
-     "Book an appointment (patients book for themselves; staff may set patientId)",
+     "Book an appointment for the signed-in patient (starts pending)",
     requestBody: requestBody(appointmentBodySchema),
     responses: { "201": jsonResponse("Created", "Appointment") },
    },
@@ -647,6 +670,77 @@ const spec = {
     summary: "Cancel/remove an appointment (deletes upstream in OpenEMR)",
     parameters: paramsFrom(idParamSchema, "path", true),
     responses: { "200": jsonResponse("OK", "Appointment") },
+   },
+  },
+  "/api/appointments/{id}/accept": {
+   post: {
+    tags: ["Appointments"],
+    summary:
+     "Accept a pending appointment; sets status to awaiting-payment (doctor or admin)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    responses: { "200": jsonResponse("OK", "Appointment") },
+   },
+  },
+  "/api/appointments/{id}/confirm": {
+   post: {
+    tags: ["Appointments"],
+    summary:
+     "Confirm an accepted appointment after payment; sets status to booked (doctor or admin)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    responses: { "200": jsonResponse("OK", "Appointment") },
+   },
+  },
+  "/api/appointments/{id}/reschedule": {
+   post: {
+    tags: ["Appointments"],
+    summary:
+     "Reschedule a booked appointment before its start time (doctor, admin or patient)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    requestBody: requestBody(appointmentRescheduleSchema),
+    responses: { "200": jsonResponse("OK", "Appointment") },
+   },
+  },
+  "/api/appointments/{id}/done": {
+   post: {
+    tags: ["Appointments"],
+    summary:
+     "Mark an appointment as done after its scheduled start; sets status to fulfilled (doctor or admin)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    responses: { "200": jsonResponse("OK", "Appointment") },
+   },
+  },
+  "/api/appointments/{id}/cancel": {
+   post: {
+    tags: ["Appointments"],
+    summary: "Cancel an appointment (doctor or admin)",
+    parameters: paramsFrom(idParamSchema, "path", true),
+    responses: { "200": jsonResponse("OK", "Appointment") },
+   },
+  },
+  "/api/emr-access/{patientId}/requests": {
+   post: {
+    tags: ["EMR Access"],
+    summary:
+     "Request time-limited access to a patient's EMR (doctor only; patient approves)",
+    parameters: paramsFrom(emrAccessPatientParamSchema, "path", true),
+    requestBody: requestBody(emrAccessRequestSchema),
+    responses: { "201": { description: "Created" } },
+   },
+  },
+  "/api/emr-access/requests": {
+   get: {
+    tags: ["EMR Access"],
+    summary: "List the signed-in patient's EMR access requests",
+    responses: { "200": { description: "OK" } },
+   },
+  },
+  "/api/emr-access/requests/{requestId}": {
+   patch: {
+    tags: ["EMR Access"],
+    summary: "Approve or deny an EMR access request (patient only)",
+    parameters: paramsFrom(emrAccessRequestParamSchema, "path", true),
+    requestBody: requestBody(emrAccessReviewSchema),
+    responses: { "200": { description: "OK" } },
    },
   },
   "/api/emr/{patientId}/summary": {

@@ -9,6 +9,7 @@ import {
  labResultListQuerySchema,
  labResultParamSchema,
 } from "@module/lab/lab.service.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class LabRouter {
@@ -20,7 +21,7 @@ class LabRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate, withOpenEMR);
+  this.router.use(authenticate, validate(authUserSchema, "user"), withOpenEMR);
 
   this.router.get(
    "/orders",

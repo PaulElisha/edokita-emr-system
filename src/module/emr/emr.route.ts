@@ -1,7 +1,10 @@
+/** @format */
+
 import { authenticate, withOpenEMR } from "@middleware/auth.ts";
 import { requireRole } from "@middleware/role-guard.ts";
 import validate from "@middleware/validation.ts";
 import EmrController from "@module/emr/emr.controller.ts";
+import { requireEmrAccess } from "@module/emr-access/emr-access.middleware.ts";
 import {
  allergyBodySchema,
  conditionBodySchema,
@@ -14,9 +17,12 @@ import {
  emrVitalItemParamSchema,
  encounterBodySchema,
  medicationBodySchema,
+ observationBodySchema,
+ observationUpdateSchema,
  soapNoteBodySchema,
  vitalsBodySchema,
 } from "@module/emr/emr.service.ts";
+import { authUserSchema } from "@module/user/helper.ts";
 import { Router } from "express";
 
 class EmrRouter {
@@ -28,7 +34,9 @@ class EmrRouter {
  }
 
  initializeRoutes() {
-  this.router.use(authenticate, withOpenEMR);
+  this.router.use(authenticate, validate(authUserSchema, "user"), withOpenEMR);
+
+  this.router.use("/:patientId", requireEmrAccess);
 
   this.router.get(
    "/:patientId/summary",
@@ -49,16 +57,36 @@ class EmrRouter {
    EmrController.vitals,
   );
   this.router.get(
-   "/:patientId/labs",
+   "/:patientId/observations",
    requireRole("admin", "doctor", "patient"),
    validate(emrPatientParamSchema, "params"),
-   EmrController.labs,
+   EmrController.observations,
+  );
+  this.router.post(
+   "/:patientId/observations",
+   requireRole("admin", "doctor"),
+   validate(emrPatientParamSchema, "params"),
+   validate(observationBodySchema),
+   EmrController.createObservation,
   );
   this.router.get(
-   "/:patientId/labs/:observationId",
+   "/:patientId/observations/:observationId",
    requireRole("admin", "doctor", "patient"),
    validate(emrObservationParamSchema, "params"),
-   EmrController.labObservation,
+   EmrController.observation,
+  );
+  this.router.put(
+   "/:patientId/observations/:observationId",
+   requireRole("admin", "doctor"),
+   validate(emrObservationParamSchema, "params"),
+   validate(observationUpdateSchema),
+   EmrController.updateObservation,
+  );
+  this.router.delete(
+   "/:patientId/observations/:observationId",
+   requireRole("admin", "doctor"),
+   validate(emrObservationParamSchema, "params"),
+   EmrController.deleteObservation,
   );
   this.router.get(
    "/:patientId/encounters",

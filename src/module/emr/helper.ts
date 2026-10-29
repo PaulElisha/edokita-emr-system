@@ -1,3 +1,7 @@
+/** @format */
+
+import { getOpenEMRClient } from "@openemr/context.ts";
+
 import { OpenEMR } from "@/env.ts";
 import {
  conceptText,
@@ -9,10 +13,9 @@ import {
 import { setDefined } from "@shared/utils/object.ts";
 import convert from "convert-units";
 import { eq } from "drizzle-orm";
-import db from "@db/db.ts";
+import { db } from "@db/db.ts";
 import { emrRecordAuthors } from "@db/schema/emr.ts";
 import { users } from "@db/schema/user.ts";
-import type OpenEMRClient from "@module/openemr/client.ts";
 import type {
  AllergyInput,
  ConditionInput,
@@ -31,9 +34,13 @@ import type {
  ClinicalItem,
  ClinicalKind,
  ClinicalSearchResult,
+ EmrObservation,
+ EmrObservationList,
+ ObservationInput,
  ObservationItem,
  ObservationResult,
  ObservationValue,
+ StandardResource,
 } from "@module/emr/emr.service.ts";
 import type { Result } from "@shared/types.ts";
 import {
@@ -61,7 +68,8 @@ export type EmrResourceType =
  | "medication"
  | "soap_note"
  | "lab_order"
- | "lab_result";
+ | "lab_result"
+ | "observation";
 
 const KIND_RESOURCE: Partial<Record<ClinicalKind, EmrResourceType>> = {
  conditions: "condition",
@@ -70,12 +78,12 @@ const KIND_RESOURCE: Partial<Record<ClinicalKind, EmrResourceType>> = {
  encounters: "encounter",
 };
 
-export interface EmrAttribution {
+interface EmrAttribution {
  provider: MappedProvider;
  authoredAt: string;
 }
 
-export type EmrAuthorMap = Map<string, EmrAttribution>;
+type EmrAuthorMap = Map<string, EmrAttribution>;
 
 export async function recordEmrAuthor(
  patientId: string,
@@ -168,11 +176,11 @@ function applyClinicalAuthors(
 }
 
 export async function searchClinical(
- client: OpenEMRClient,
  kind: ClinicalKind,
  patientId: string,
  authors?: EmrAuthorMap,
 ): Promise<Result<ClinicalSearchResult>> {
+ const client = getOpenEMRClient();
  try {
   const resourceType = CLINICAL_RESOURCES[kind];
   const bundle = await client.fhirSearch(resourceType, {
@@ -272,31 +280,30 @@ function mapObservation(o: FhirObservation): ObservationItem {
    };
   })
   .filter((c) => Boolean(c.code) && c.value !== undefined);
-  const value = observationValue(o);
-  const referenceRange = (o.referenceRange ?? [])
-   .map((r) => ({
-    low: r.low?.value,
-    high: r.high?.value,
-    unit: r.low?.unit ?? r.high?.unit,
-    text: r.text,
-   }))
-   .filter(
-    (r) => r.low !== undefined || r.high !== undefined || Boolean(r.text),
-   );
-  const item: ObservationItem = {
-   id: o.id,
-   code: conceptText(o.code),
-   category: (o.category ?? [])
-    .map((c) => c.text ?? c.coding?.[0]?.code)
-    .filter((c): c is string => Boolean(c)),
-   effective: o.effectiveDateTime,
-   value: value ? toMetric(value) : undefined,
-   encounterId: referenceId(o.encounter),
-  };
-  const ranged =
-   referenceRange.length > 0 ? { ...item, referenceRange } : item;
-  return components.length > 0 ? { ...ranged, components } : ranged;
- }
+ const value = observationValue(o);
+ const referenceRange = (o.referenceRange ?? [])
+  .map((r) => ({
+   low: r.low?.value,
+   high: r.high?.value,
+   unit: r.low?.unit ?? r.high?.unit,
+   text: r.text,
+  }))
+  .filter(
+   (r) => r.low !== undefined || r.high !== undefined || Boolean(r.text),
+  );
+ const item: ObservationItem = {
+  id: o.id,
+  code: conceptText(o.code),
+  category: (o.category ?? [])
+   .map((c) => c.text ?? c.coding?.[0]?.code)
+   .filter((c): c is string => Boolean(c)),
+  effective: o.effectiveDateTime,
+  value: value ? toMetric(value) : undefined,
+  encounterId: referenceId(o.encounter),
+ };
+ const ranged = referenceRange.length > 0 ? { ...item, referenceRange } : item;
+ return components.length > 0 ? { ...ranged, components } : ranged;
+}
 
 function attributeObservation(
  item: ObservationItem,
@@ -312,11 +319,11 @@ function attributeObservation(
 }
 
 export async function searchObservations(
- client: OpenEMRClient,
  patientId: string,
  category: string,
  authors?: EmrAuthorMap,
 ): Promise<Result<ObservationResult>> {
+ const client = getOpenEMRClient();
  try {
   const bundle = await client.fhirSearch("Observation", {
    patient: patientId,
@@ -331,32 +338,121 @@ export async function searchObservations(
   const authorMap = authors ?? (await findEmrAuthorsByPatient(patientId));
   const attributed = items.map((item) => attributeObservation(item, authorMap));
 
-  return [{ total: bundle.total ?? attributed.length, items: attributed }, null];
+  return [
+   { total: bundle.total ?? attributed.length, items: attributed },
+   null,
+  ];
  } catch (e) {
   return [null, toError(e)];
  }
 }
 
-export async function getObservation(
- client: OpenEMRClient,
+const OBSERVATION_UUID_PATTERN =
+ /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function observationQuery(
  patientId: string,
- observationId: string,
+ extra: Record<string, string | undefined> = {},
+): Record<string, string | undefined> {
+ const ref = OBSERVATION_UUID_PATTERN.test(patientId)
+  ? { patient_uuid: patientId }
+  : { patient_id: patientId };
+ return { ...ref, ...extra };
+}
+
+function asString(value: unknown): string | undefined {
+ return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function mapStandardObservation(row: StandardResource): EmrObservation {
+ return {
+  id: asString(row.observation_uuid),
+  patientId: asString(row.patient_uuid),
+  encounterId: asString(row.encounter_uuid),
+  category: asString(row.category),
+  code: asString(row.code),
+  codeType: asString(row.code_type),
+  description: asString(row.description),
+  value: asString(row.ob_value),
+  unit: asString(row.ob_unit),
+  status: asString(row.ob_status),
+  type: asString(row.ob_type),
+  date: asString(row.date),
+  endDate: asString(row.date_end),
+  note: asString(row.observation),
+ };
+}
+
+function attributeStandardObservation(
+ item: EmrObservation,
+ authorMap: EmrAuthorMap,
+): EmrObservation {
+ const author = item.id ? authorMap.get(`observation:${item.id}`) : undefined;
+ if (!author) return item;
+ return { ...item, provider: author.provider, authoredAt: author.authoredAt };
+}
+
+export async function listObservations(
+ patientId: string,
+ category?: string,
  authors?: EmrAuthorMap,
-): Promise<Result<ObservationItem>> {
+): Promise<Result<EmrObservationList>> {
+ const client = getOpenEMRClient();
  try {
-  const [result, err] = await searchObservations(
-   client,
-   patientId,
-   "laboratory",
-   authors,
+  const rows = await client.standardGet<StandardResource>(
+   "/api/observation",
+   observationQuery(patientId, { category }),
   );
-  if (err || !result) return [null, err];
-  const item = result.items.find((i) => i.id === observationId);
-  if (!item) return [null, APIError.notFound("Lab observation not found")];
-  return [item, null];
+  const items = rows.map(mapStandardObservation);
+  const authorMap = authors ?? (await findEmrAuthorsByPatient(patientId));
+  const attributed = items.map((item) =>
+   attributeStandardObservation(item, authorMap),
+  );
+  return [{ total: attributed.length, items: attributed }, null];
  } catch (e) {
   return [null, toError(e)];
  }
+}
+
+export async function getObservationResource(
+ patientId: string,
+ observationId: string,
+ authors?: EmrAuthorMap,
+): Promise<Result<EmrObservation>> {
+ const client = getOpenEMRClient();
+ try {
+  const rows = await client.standardGet<StandardResource>(
+   `/api/observation/${observationId}`,
+   observationQuery(patientId),
+  );
+  const row = rows[0];
+  if (!row) return [null, APIError.notFound("Observation not found")];
+  const item = mapStandardObservation(row);
+  const authorMap = authors ?? (await findEmrAuthorsByPatient(patientId));
+  return [attributeStandardObservation(item, authorMap), null];
+ } catch (e) {
+  return [null, toError(e)];
+ }
+}
+
+export function buildObservationPayload(
+ input: Partial<ObservationInput>,
+): Record<string, unknown> {
+ const payload: Record<string, unknown> = {};
+ const set = setDefined(payload);
+ set("encounter_uuid", input.encounterId);
+ set("category", input.category);
+ set("code", input.code);
+ set("code_type", input.codeType);
+ set("description", input.description);
+ set("ob_value", input.value);
+ set("ob_unit", input.unit);
+ set("ob_status", input.status);
+ set("ob_type", input.type);
+ set("date", input.date);
+ set("date_end", input.endDate);
+ set("observation", input.note);
+ return payload;
 }
 
 function round(value: number, decimals: number): number {

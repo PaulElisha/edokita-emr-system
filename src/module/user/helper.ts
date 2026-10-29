@@ -1,3 +1,5 @@
+/** @format */
+
 import { db as defaultDb } from "@db/db.ts";
 import type { DbClient } from "@db/transaction.ts";
 import { roles, roleSchema, type UserRole } from "@db/schema/role.ts";
@@ -10,21 +12,22 @@ import { decryptSecret, encryptSecret } from "@shared/utils/secret.ts";
 import { eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
-export type UserRow = typeof users.$inferSelect;
+type UserRow = typeof users.$inferSelect;
 type UserRecord = UserRow & { role: UserRole };
 
-export const openEMRLinkSchema = z.object({
+const openEMRLinkSchema = z.object({
  subject: z.string().optional(),
  fhirUser: z.string().optional(),
  patientId: z.string().optional(),
+ patientPid: z.string().optional(),
  practitionerId: z.string().optional(),
 });
-export type OpenEMRLink = z.infer<typeof openEMRLinkSchema>;
-export const openEMRLinkUpdateSchema = openEMRLinkSchema.partial();
+const openEMRLinkUpdateSchema = openEMRLinkSchema.partial();
 export type OpenEMRLinkUpdate = z.infer<typeof openEMRLinkUpdateSchema>;
 
-export const openEMRProvisionSchema = openEMRLinkSchema.pick({
+const openEMRProvisionSchema = openEMRLinkSchema.pick({
  patientId: true,
+ patientPid: true,
  practitionerId: true,
 });
 export type OpenEMRProvision = z.infer<typeof openEMRProvisionSchema>;
@@ -34,7 +37,7 @@ export interface OpenEMRCredentials {
  password: string;
 }
 
-export const userSchema = z.object({
+const userSchema = z.object({
  id: z.string(),
  email: z.string().email(),
  passwordHash: z.string(),
@@ -48,9 +51,15 @@ export const userSchema = z.object({
 });
 export type User = z.infer<typeof userSchema>;
 
-export type PublicUser = Omit<User, "passwordHash" | "sessionEpoch">;
+const publicUserSchema = userSchema.omit({ passwordHash: true });
+export type PublicUser = z.infer<typeof publicUserSchema>;
 
-export const createUserSchema = userSchema
+export const authUserSchema = publicUserSchema.extend({
+ userId: z.string(),
+});
+export type AuthUser = z.infer<typeof authUserSchema>;
+
+const createUserSchema = userSchema
  .omit({ id: true, createdAt: true, sessionEpoch: true })
  .extend({
   firstName: z.string().min(1),
@@ -63,7 +72,7 @@ export const updateUserSchema = createUserSchema
  .partial();
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 
-export function toUser(row: UserRecord): User {
+function toUser(row: UserRecord): User {
  return {
   id: row.id,
   email: row.email,
@@ -76,16 +85,12 @@ export function toUser(row: UserRecord): User {
    subject: row.openemrSubject ?? undefined,
    fhirUser: row.openemrFhirUser ?? undefined,
    patientId: row.openemrPatientId ?? undefined,
+   patientPid: row.openemrPatientPid ?? undefined,
    practitionerId: row.openemrPractitionerId ?? undefined,
   },
   sessionEpoch: row.sessionEpoch,
   createdAt: row.createdAt.toISOString(),
  };
-}
-
-export function toPublicUser(user: User): PublicUser {
- const { passwordHash: _passwordHash, sessionEpoch: _sessionEpoch, ...publicUser } = user;
- return publicUser;
 }
 
 export async function findUserByEmail(
@@ -104,7 +109,7 @@ export async function findUserByEmail(
  return [toUser({ ...row.user, role: row.role as UserRole }), null];
 }
 
-export async function findUserById(
+async function findUserRecordById(
  id: string,
  db: DbClient = defaultDb,
 ): Promise<Result<User>> {
@@ -118,6 +123,23 @@ export async function findUserById(
  if (!row) return [null, APIError.notFound("User not found")];
 
  return [toUser({ ...row.user, role: row.role as UserRole }), null];
+}
+
+export async function findUserById(
+ id: string,
+ db: DbClient = defaultDb,
+): Promise<Result<PublicUser>> {
+ const [user, err] = await findUserRecordById(id, db);
+ if (err || !user) return [null, err];
+ const { passwordHash: _passwordHash, ...publicUser } = user;
+ return [publicUser, null];
+}
+
+export async function findUserByIdWithPassword(
+ id: string,
+ db: DbClient = defaultDb,
+): Promise<Result<User>> {
+ return findUserRecordById(id, db);
 }
 
 export async function findUserByPatientId(
@@ -217,6 +239,7 @@ export async function createUser(
    openemrSubject: input.openemr.subject,
    openemrFhirUser: input.openemr.fhirUser,
    openemrPatientId: input.openemr.patientId,
+   openemrPatientPid: input.openemr.patientPid,
    openemrPractitionerId: input.openemr.practitionerId,
   })
   .returning();
@@ -230,12 +253,13 @@ export async function linkOpenEMR(
  id: string,
  link: OpenEMRLinkUpdate,
  db: DbClient = defaultDb,
-): Promise<Result<User>> {
+): Promise<Result<PublicUser>> {
  const patch: Partial<UserRow> = {};
  const set = setDefined(patch);
  set("openemrSubject", link.subject);
  set("openemrFhirUser", link.fhirUser);
  set("openemrPatientId", link.patientId);
+ set("openemrPatientPid", link.patientPid);
  set("openemrPractitionerId", link.practitionerId);
  return applyUserPatch(id, patch, db);
 }
@@ -243,7 +267,7 @@ export async function linkOpenEMR(
 export async function updateUser(
  id: string,
  input: UpdateUserInput,
-): Promise<Result<User>> {
+): Promise<Result<PublicUser>> {
  const patch: Partial<UserRow> = {};
  const set = setDefined(patch);
  set("firstName", input.firstName);
@@ -283,17 +307,17 @@ export async function saveOpenEMRCredentials(
  id: string,
  credentials: OpenEMRCredentials,
  db: DbClient = defaultDb,
- ): Promise<Result<void>> {
-  try {
-   const encrypted = await encryptSecret(credentials.password);
-   const [row] = await db
-    .update(users)
-    .set({
-     openemrUsername: credentials.username,
-     openemrPassword: encrypted,
-    })
-    .where(eq(users.id, id))
-    .returning({ id: users.id });
+): Promise<Result<void>> {
+ try {
+  const encrypted = await encryptSecret(credentials.password);
+  const [row] = await db
+   .update(users)
+   .set({
+    openemrUsername: credentials.username,
+    openemrPassword: encrypted,
+   })
+   .where(eq(users.id, id))
+   .returning({ id: users.id });
   if (!row) return [null, APIError.notFound("User not found")];
   return [undefined, null];
  } catch (e) {
@@ -326,7 +350,7 @@ async function applyUserPatch(
  id: string,
  patch: Partial<UserRow>,
  db: DbClient = defaultDb,
-): Promise<Result<User>> {
+): Promise<Result<PublicUser>> {
  if (Object.keys(patch).length === 0) return findUserById(id, db);
 
  const [row] = await db

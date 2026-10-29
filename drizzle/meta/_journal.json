@@ -64,6 +64,27 @@
       "when": 1792284000000,
       "tag": "0008_lab_role",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792497091071,
+      "tag": "0009_openemr_refresh_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793141678215,
+      "tag": "0010_talented_mister_sinister",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793147215708,
+      "tag": "0011_emr_access_requests",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import asyncHandler from "@middleware/async-handler.ts";
+import AsyncHandler from "@middleware/async-handler.ts";
 import type { Request, Response } from "express";
 import ScheduleService, {
  type PractitionerParam,
@@ -6,7 +6,7 @@ import ScheduleService, {
 } from "@module/schedule/schedule.service.ts";
 
 class ScheduleController {
- list = asyncHandler(
+ list = AsyncHandler(
   async (req: Request<PractitionerParam>, res: Response) => {
    const [data, err] = await ScheduleService.list(
     req.params.practitionerId,
@@ -16,7 +16,7 @@ class ScheduleController {
   },
  );
 
- updateSchedule = asyncHandler(
+ updateSchedule = AsyncHandler(
   async (
    req: Request<PractitionerParam, unknown, UpdateScheduleInput>,
    res: Response,
